@@ -1,0 +1,22 @@
+# Ce qu'EAS n'a pas besoin de téléverser.
+#
+# Attention : dès lors que ce fichier existe, EAS l'utilise **à la place** de
+# .gitignore — il doit donc répéter les exclusions lourdes, faute de quoi
+# node_modules partirait dans l'archive.
+
+node_modules/
+
+# Projets natifs : régénérés par prebuild sur les serveurs EAS à partir de
+# app.json. Les téléverser ferait tourner le build sur une version locale figée.
+android/
+ios/
+
+# Cache de la chaîne de production des données. Les jeux de données produits,
+# eux, sont versionnés dans src/data et doivent partir.
+scripts/.cache/
+
+.expo/
+dist/
+web-build/
+*.log
+.DS_Store
