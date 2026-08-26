@@ -1,0 +1,23 @@
+# Réglages pnpm. Ce fichier — et non .npmrc — est l'endroit que pnpm 11 lit pour
+# ces clés ; posées dans .npmrc elles sont silencieusement ignorées, ce qui donne
+# l'illusion trompeuse d'une configuration active.
+
+# React Native attend un node_modules à plat : son autolinking natif et plusieurs
+# de ses dépendances remontent l'arborescence pour résoudre leurs pairs. Le
+# layout isolé de pnpm par défaut les fait échouer à la compilation native, alors
+# même que Metro, lui, résout correctement — le problème ne se voit donc qu'au
+# moment de construire l'application, et pas en développement.
+nodeLinker: hoisted
+
+# Scripts d'installation autorisés. La clé est `allowBuilds` : les
+# `onlyBuiltDependencies` et `ignoredBuiltDependencies` de pnpm 10 ne sont plus
+# lus, et leur présence laisse `pnpm install` sortir en erreur sans rien dire de
+# la raison. esbuild est tiré par tsx, qui exécute les scripts de `scripts/`.
+allowBuilds:
+  esbuild: true
+
+minimumReleaseAgeExclude:
+  - expo-dev-client@57.0.16
+  - expo-dev-launcher@57.0.16
+  - expo-dev-menu@57.0.16
+  - expo-system-ui@57.0.3

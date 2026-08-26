@@ -1,0 +1,64 @@
+{
+  "expo": {
+    "name": "Portulan",
+    "slug": "portulan",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "portulan",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#F6EBD8"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.portulan.app"
+    },
+    "android": {
+      "package": "com.portulan.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F6EBD8"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-audio",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#F6EBD8",
+          "image": "./assets/splash.png",
+          "imageWidth": 200,
+          "dark": {
+            "backgroundColor": "#141B22"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fb36164d-ce81-406d-8496-61390d89bf3b"
+      }
+    },
+    "owner": "raphaeltkorp"
+  }
+}
