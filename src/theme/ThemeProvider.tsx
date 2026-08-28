@@ -1,6 +1,8 @@
 import { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { useColorScheme } from 'react-native';
 
+import type { InkId } from '@/game/economy';
+import { withInk } from './inks';
 import {
   borderWidth,
   colorSchemes,
@@ -19,6 +21,7 @@ export type SchemePreference = ColorScheme | 'system';
 
 export type Theme = {
   scheme: ColorScheme;
+  ink: InkId;
   colors: Colors;
   space: typeof space;
   radius: typeof radius;
@@ -31,10 +34,11 @@ export type Theme = {
   fontFamily: typeof fontFamily;
 };
 
-function buildTheme(scheme: ColorScheme): Theme {
+function buildTheme(scheme: ColorScheme, ink: InkId): Theme {
   return {
     scheme,
-    colors: colorSchemes[scheme],
+    ink,
+    colors: withInk(colorSchemes[scheme], scheme, ink),
     space,
     radius,
     borderWidth,
@@ -47,20 +51,22 @@ function buildTheme(scheme: ColorScheme): Theme {
   };
 }
 
-const ThemeContext = createContext<Theme>(buildTheme('light'));
+const ThemeContext = createContext<Theme>(buildTheme('light', 'sepia'));
 
 export function ThemeProvider({
   preference = 'system',
+  ink = 'sepia',
   children,
 }: {
   preference?: SchemePreference;
+  ink?: InkId;
   children: ReactNode;
 }) {
   const system = useColorScheme();
   const scheme: ColorScheme =
     preference === 'system' ? (system === 'dark' ? 'dark' : 'light') : preference;
 
-  const theme = useMemo(() => buildTheme(scheme), [scheme]);
+  const theme = useMemo(() => buildTheme(scheme, ink), [scheme, ink]);
 
   return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>;
 }
@@ -69,12 +75,6 @@ export function useTheme(): Theme {
   return useContext(ThemeContext);
 }
 
-/**
- * Crée des styles dépendants du thème sans recalcul à chaque rendu.
- *
- *   const useStyles = makeStyles((t) => ({ card: { padding: t.space.lg } }));
- *   const styles = useStyles();
- */
 export function makeStyles<T extends Record<string, unknown>>(factory: (theme: Theme) => T) {
   return function useStyles(): T {
     const theme = useTheme();

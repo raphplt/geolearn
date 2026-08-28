@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -7,81 +8,57 @@ import Animated, {
 } from 'react-native-reanimated';
 
 import { tap } from '@/fx/haptics';
-import { useTheme } from '@/theme';
+import { useTheme, type Theme } from '@/theme';
 import { Text } from './Text';
 
-export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
+export type ButtonVariant = 'action' | 'secondary' | 'ghost';
+
+export type ButtonTone = 'danger' | 'reward' | 'success' | 'ink';
 
 export type ButtonProps = {
   label: string;
   onPress?: () => void;
   variant?: ButtonVariant;
+  tone?: ButtonTone;
   disabled?: boolean;
-  /** Occupe toute la largeur disponible. */
   block?: boolean;
-  /** Élément posé avant le libellé — un emoji drapeau, un numéro de département. */
   leading?: React.ReactNode;
   detail?: string;
+  size?: 'md' | 'lg';
   style?: ViewStyle;
   accessibilityHint?: string;
 };
 
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-/**
- * Bouton de l'application.
- *
- * L'enfoncement est animé par un ressort plutôt que par une transition de durée
- * fixe : un bouton qui se relâche linéairement se sent mécanique, là où un
- * ressort légèrement sous-amorti donne l'impression d'une matière qui reprend
- * sa forme. C'est la même intention que l'aiguille de boussole qui dépasse
- * avant de se poser.
- */
 export function Button({
   label,
   onPress,
-  variant = 'primary',
+  variant = 'action',
+  tone = 'danger',
   disabled = false,
   block = false,
   leading,
   detail,
+  size = 'md',
   style,
   accessibilityHint,
 }: ButtonProps) {
   const theme = useTheme();
   const pressed = useSharedValue(0);
 
-  const palette: Record<ButtonVariant, { bg: string; fg: string; border: string }> = {
-    primary: {
-      bg: theme.colors.text,
-      fg: theme.colors.textInverse,
-      border: theme.colors.text,
-    },
-    secondary: {
-      bg: theme.colors.surfaceRaised,
-      fg: theme.colors.text,
-      border: theme.colors.borderStrong,
-    },
-    ghost: { bg: 'transparent', fg: theme.colors.textSecondary, border: 'transparent' },
-    danger: {
-      bg: theme.colors.danger,
-      fg: theme.colors.textOnAccent,
-      border: theme.colors.dangerStrong,
-    },
-  };
-  const colors = palette[variant];
+  const skin = skinOf(theme, variant, tone);
+  const height = size === 'lg' ? 62 : theme.hitTarget.comfortable;
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * 0.03 }, { translateY: pressed.value * 2 }],
+  const faceStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: pressed.value * skin.depth }],
   }));
 
   const handlePressIn = useCallback(() => {
-    pressed.value = withSpring(1, theme.motion.spring.snappy);
-  }, [pressed, theme.motion.spring.snappy]);
+    pressed.value = withSpring(1, { damping: 24, stiffness: 480, mass: 0.6 });
+  }, [pressed]);
 
   const handlePressOut = useCallback(() => {
-    pressed.value = withSpring(0, theme.motion.spring.snappy);
-  }, [pressed, theme.motion.spring.snappy]);
+    pressed.value = withSpring(0, theme.motion.spring.pop);
+  }, [pressed, theme.motion.spring.pop]);
 
   const handlePress = useCallback(() => {
     tap();
@@ -89,7 +66,7 @@ export function Button({
   }, [onPress]);
 
   return (
-    <AnimatedPressable
+    <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityHint={accessibilityHint}
@@ -99,38 +76,141 @@ export function Button({
       onPressOut={handlePressOut}
       onPress={handlePress}
       style={[
-        animatedStyle,
         {
-          minHeight: theme.hitTarget.comfortable,
-          paddingHorizontal: theme.space.lg,
-          paddingVertical: theme.space.md,
-          borderRadius: theme.radius.md,
-          backgroundColor: colors.bg,
-          borderWidth: theme.borderWidth.thin,
-          borderColor: colors.border,
-          opacity: disabled ? theme.opacity.disabled : 1,
           alignSelf: block ? 'stretch' : 'flex-start',
-          justifyContent: 'center',
+          opacity: disabled ? theme.opacity.disabled : 1,
         },
-        variant !== 'ghost' ? theme.elevation.sheet : null,
         style,
       ]}
     >
-      <View style={styles.row}>
-        {leading ? <View style={{ marginRight: theme.space.md }}>{leading}</View> : null}
-        <View style={styles.labels}>
-          <Text variant="label" color={colors.fg} numberOfLines={2}>
-            {label}
-          </Text>
-          {detail ? (
-            <Text variant="caption" color={colors.fg} style={{ opacity: 0.62 }} numberOfLines={1}>
-              {detail}
-            </Text>
-          ) : null}
-        </View>
+      <View
+        style={{
+          backgroundColor: skin.side,
+          borderRadius: theme.radius.md,
+          paddingBottom: skin.depth,
+        }}
+      >
+        <Animated.View style={faceStyle}>
+          <View
+            style={{
+              minHeight: height,
+              borderRadius: theme.radius.md,
+              backgroundColor: skin.face,
+              borderWidth: skin.borderWidth,
+              borderColor: skin.border,
+              paddingHorizontal: theme.space.lg,
+              paddingVertical: theme.space.md,
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {skin.sheen ? (
+              <LinearGradient
+                colors={['rgba(255,255,255,0.22)', 'rgba(255,255,255,0)']}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={StyleSheet.absoluteFill}
+                pointerEvents="none"
+              />
+            ) : null}
+
+            <View style={styles.row}>
+              {leading ? <View style={{ marginRight: theme.space.md }}>{leading}</View> : null}
+              <View style={styles.labels}>
+                <Text
+                  variant={size === 'lg' ? 'titleLg' : 'label'}
+                  color={skin.label}
+                  align={leading ? 'left' : 'center'}
+                  numberOfLines={2}
+                >
+                  {label}
+                </Text>
+                {detail ? (
+                  <Text
+                    variant="caption"
+                    color={skin.label}
+                    align={leading ? 'left' : 'center'}
+                    style={{ opacity: 0.72 }}
+                    numberOfLines={1}
+                  >
+                    {detail}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        </Animated.View>
       </View>
-    </AnimatedPressable>
+    </Pressable>
   );
+}
+
+type Skin = {
+  face: string;
+  side: string;
+  border: string;
+  borderWidth: number;
+  label: string;
+  depth: number;
+  sheen: boolean;
+};
+
+function skinOf(theme: Theme, variant: ButtonVariant, tone: ButtonTone): Skin {
+  if (variant === 'ghost') {
+    return {
+      face: 'transparent',
+      side: 'transparent',
+      border: 'transparent',
+      borderWidth: 0,
+      label: theme.colors.textSecondary,
+      depth: 0,
+      sheen: false,
+    };
+  }
+
+  if (variant === 'secondary') {
+    return {
+      face: theme.colors.surfaceRaised,
+      side: theme.colors.borderStrong,
+      border: theme.colors.borderStrong,
+      borderWidth: theme.borderWidth.thin,
+      label: theme.colors.text,
+      depth: 2,
+      sheen: false,
+    };
+  }
+
+  const accents: Record<ButtonTone, { face: string; side: string; label: string }> = {
+    danger: {
+      face: theme.colors.danger,
+      side: theme.colors.dangerDeep,
+      label: theme.colors.textOnAccent,
+    },
+    reward: {
+      face: theme.colors.reward,
+      side: theme.colors.rewardDeep,
+      label: theme.colors.textOnAccent,
+    },
+    success: {
+      face: theme.colors.success,
+      side: theme.colors.successDeep,
+      label: theme.colors.textOnAccent,
+    },
+    ink: {
+      face: theme.colors.text,
+      side: theme.colors.text,
+      label: theme.colors.textInverse,
+    },
+  };
+
+  const accent = accents[tone];
+  return {
+    ...accent,
+    border: 'transparent',
+    borderWidth: 0,
+    depth: tone === 'ink' ? 0 : 5,
+    sheen: tone !== 'ink',
+  };
 }
 
 const styles = StyleSheet.create({

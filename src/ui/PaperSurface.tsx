@@ -6,34 +6,21 @@ const GRAIN_LIGHT = require('../../assets/paper-grain.png');
 const GRAIN_DARK = require('../../assets/paper-grain-dark.png');
 
 export type PaperSurfaceProps = ViewProps & {
-  /** Niveau de la feuille : creusée, à plat, ou posée par-dessus. */
   tone?: 'sunk' | 'base' | 'raised';
-  /** Intensité du grain, de 0 à 1. Le fond général en veut plus qu'une carte posée dessus. */
   grain?: number;
   radius?: keyof ReturnType<typeof useTheme>['radius'] | number;
-  bordered?: boolean;
+  bordered?: boolean | 'soft' | 'base' | 'strong';
   elevation?: 'none' | 'sheet' | 'lifted' | 'overlay';
+  bevel?: boolean;
 };
 
-/**
- * Surface de papier — le matériau de base de toute l'application.
- *
- * Le grain est une image répétée superposée à l'aplat, et non un filtre SVG :
- * react-native-svg expose bien `feTurbulence` côté JavaScript, mais sans
- * implémentation native, si bien que le filtre ne rend rien sur l'appareil.
- *
- * La texture encode son intensité dans le **canal alpha** d'un aplat d'encre.
- * React Native n'offre pas de mode de fusion « multiply » portable ; en peignant
- * de l'encre translucide là où le grain est dense, on obtient exactement l'effet
- * recherché — la surface se patine sans jamais s'éclaircir — avec le seul
- * alpha-blending, disponible partout.
- */
 export function PaperSurface({
   tone = 'base',
   grain = 0.5,
   radius = 'md',
   bordered = false,
   elevation = 'none',
+  bevel,
   style,
   children,
   ...rest
@@ -49,11 +36,20 @@ export function PaperSurface({
 
   const borderRadius = typeof radius === 'number' ? radius : theme.radius[radius];
 
+  const borderColor =
+    bordered === 'soft'
+      ? theme.colors.borderSoft
+      : bordered === 'strong'
+        ? theme.colors.borderStrong
+        : theme.colors.border;
+
+  const showBevel = bevel ?? elevation !== 'none';
+
   const surfaceStyle: ViewStyle = {
     backgroundColor: background,
     borderRadius,
     ...(bordered
-      ? { borderWidth: theme.borderWidth.hair, borderColor: theme.colors.border }
+      ? { borderWidth: theme.borderWidth.hair, borderColor }
       : null),
     ...(elevation !== 'none' ? theme.elevation[elevation] : null),
   };
@@ -61,9 +57,6 @@ export function PaperSurface({
   return (
     <View {...rest} style={[surfaceStyle, style]}>
       {grain > 0 ? (
-        /* Le voile est enveloppé dans une vue non tangible : `pointerEvents`
-           n'existe pas sur le style d'une Image, et sans cette précaution la
-           texture intercepterait les touchers destinés au contenu. */
         <View pointerEvents="none" style={StyleSheet.absoluteFill}>
           <Image
             source={theme.scheme === 'dark' ? GRAIN_DARK : GRAIN_LIGHT}
@@ -72,6 +65,22 @@ export function PaperSurface({
           />
         </View>
       ) : null}
+
+      {showBevel ? (
+        <View
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            left: borderRadius * 0.5,
+            right: borderRadius * 0.5,
+            top: 0,
+            height: 1,
+            backgroundColor: theme.colors.bevel,
+            opacity: theme.scheme === 'dark' ? 1 : 0.7,
+          }}
+        />
+      ) : null}
+
       {children}
     </View>
   );
