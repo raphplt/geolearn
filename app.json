@@ -23,12 +23,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6EBD8"
       },
-      "permissions": [
-        "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ]
+      "permissions": []
     },
     "web": {
       "bundler": "metro",
@@ -37,7 +32,6 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-audio",
       [
         "expo-splash-screen",
         {

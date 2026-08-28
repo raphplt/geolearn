@@ -4,13 +4,16 @@ import { router } from 'expo-router';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { brevetById } from '@/game/brevets';
+import { rankFor } from '@/game/economy';
 import { seedFrom, dailyKey } from '@/game/rng';
 import { emojiSummary, expeditionConfig, dailyConfig } from '@/game/session';
-import { recordKey, useProgress } from '@/store/progress';
+import { recordKey, useProgress, type SessionReport } from '@/store/progress';
 import { useSession } from '@/store/session';
 import { useTheme } from '@/theme';
 import { Button } from '@/ui/Button';
 import { CompassRose } from '@/ui/brand/CompassRose';
+import { IconBrevet, IconDoublon } from '@/ui/icons';
 import { PaperSurface } from '@/ui/PaperSurface';
 import { Text } from '@/ui/Text';
 
@@ -20,16 +23,15 @@ export default function Results() {
 
   const session = useSession((s) => s.session);
   const summary = useSession((s) => s.summary);
-  const start = useSession((s) => s.start);
+  const prepare = useSession((s) => s.prepare);
   const completeDaily = useProgress((s) => s.completeDaily);
   const best = useProgress((s) => s.records.best);
   const streak = useProgress((s) => s.daily.currentStreak);
+  const report = useSession((s) => s.report);
 
   const todayKey = dailyKey();
   const savedDaily = useRef(false);
 
-  /* Le relevé du jour n'est consigné qu'une fois : c'est lui qui porte la série,
-     et une double écriture la ferait sauter d'un cran indûment. */
   useEffect(() => {
     if (!session || !summary || savedDaily.current) return;
     if (session.config.mode !== 'daily') return;
@@ -46,8 +48,6 @@ export default function Results() {
   const isRecord = useMemo(() => {
     if (!session || !summary) return false;
     const key = recordKey(session.config.atlasId, session.config.mode);
-    /* `recordSession` a déjà écrit le nouveau meilleur score : on compare donc
-       à égalité, et l'on exige une partie non vide pour ne pas fêter un abandon. */
     return summary.asked > 0 && (best[key] ?? 0) === summary.score && summary.score > 0;
   }, [session, summary, best]);
 
@@ -71,10 +71,14 @@ export default function Results() {
   const accuracy = Math.round(summary.accuracy * 100);
 
   const replay = () => {
-    start(
+    prepare(
       isDaily
         ? dailyConfig(session.config.atlasId, seedFrom(`daily:${todayKey}:${session.config.atlasId}`))
-        : expeditionConfig(session.config.atlasId, seedFrom(`${session.config.atlasId}:${Date.now()}`)),
+        : expeditionConfig(
+            session.config.atlasId,
+            seedFrom(`${session.config.atlasId}:${Date.now()}`),
+            session.config.rung,
+          ),
     );
     router.replace('/play');
   };
@@ -144,6 +148,12 @@ export default function Results() {
         </Animated.View>
       ) : null}
 
+      {report ? (
+        <Animated.View entering={FadeInDown.delay(280).duration(420)}>
+          <Ledger report={report} />
+        </Animated.View>
+      ) : null}
+
       <View style={{ flex: 1 }} />
 
       <View style={{ gap: theme.space.sm }}>
@@ -153,7 +163,7 @@ export default function Results() {
           <Button label="Repartir" block onPress={replay} />
         )}
         <Button
-          label="Retour à l’atlas"
+          label="Revenir au port"
           variant="secondary"
           block
           onPress={() => router.replace('/')}
@@ -163,13 +173,6 @@ export default function Results() {
   );
 }
 
-/**
- * Le score, affiché comme le cadran d'un instrument.
- *
- * Il apparaît par un ressort plutôt qu'en fondu : la partie vient de se
- * terminer sur une tension, et un chiffre qui se pose avec un léger rebond
- * clôt le geste au lieu de le laisser s'éteindre.
- */
 function ScoreDial({ score, record }: { score: number; record: boolean }) {
   const theme = useTheme();
   const scale = useSharedValue(0.6);
@@ -203,6 +206,133 @@ function ScoreDial({ score, record }: { score: number; record: boolean }) {
         </View>
       ) : null}
     </Animated.View>
+  );
+}
+
+function Ledger({ report }: { report: SessionReport }) {
+  const theme = useTheme();
+
+  const rankBefore = rankFor(report.xpBefore);
+  const rankAfter = rankFor(report.xpAfter);
+  const promoted = rankAfter.index > rankBefore.index;
+
+  const total =
+    report.earnings.doublons + report.brevetDoublons + report.carnet.doublons;
+  if (total === 0 && report.earnings.xp === 0) return null;
+
+  return (
+    <PaperSurface
+      tone="raised"
+      bordered
+      radius="lg"
+      grain={0.3}
+      elevation="sheet"
+      style={{ padding: theme.space.lg, marginTop: theme.space.md }}
+    >
+      {report.earnings.lines.map((line) => (
+        <View
+          key={line.label}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.md,
+            paddingVertical: 3,
+          }}
+        >
+          <Text variant="bodySm" color="textSecondary" style={{ flex: 1 }} numberOfLines={1}>
+            {line.label}
+          </Text>
+          {line.xp > 0 ? (
+            <Text variant="numeralSm" color="info" tabular>
+              +{line.xp} xp
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, minWidth: 62, justifyContent: 'flex-end' }}>
+            <IconDoublon size={13} color={theme.colors.reward} active />
+            <Text variant="numeralSm" tabular>
+              +{line.doublons}
+            </Text>
+          </View>
+        </View>
+      ))}
+
+      {report.carnet.doublons > 0 ? (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: theme.space.md,
+            paddingVertical: 3,
+          }}
+        >
+          <Text variant="bodySm" color="success" style={{ flex: 1 }}>
+            Carnet de bord — {report.carnet.completed} objectif
+            {report.carnet.completed > 1 ? 's' : ''}
+          </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <IconDoublon size={13} color={theme.colors.reward} active />
+            <Text variant="numeralSm" tabular>
+              +{report.carnet.doublons}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+
+      {promoted ? (
+        <View
+          style={{
+            marginTop: theme.space.md,
+            padding: theme.space.md,
+            borderRadius: theme.radius.md,
+            backgroundColor: theme.colors.infoSoft,
+            borderWidth: theme.borderWidth.hair,
+            borderColor: theme.colors.info,
+          }}
+        >
+          <Text variant="cartouche" color="info">
+            Promotion
+          </Text>
+          <Text variant="title" style={{ marginTop: theme.space.xxs }}>
+            {rankAfter.name}
+          </Text>
+        </View>
+      ) : null}
+
+      {report.brevets.length > 0 ? (
+        <View style={{ marginTop: theme.space.md, gap: theme.space.sm }}>
+          {report.brevets.map((id) => {
+            const brevet = brevetById(id);
+            if (!brevet) return null;
+            return (
+              <View
+                key={id}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: theme.space.md,
+                  padding: theme.space.md,
+                  borderRadius: theme.radius.md,
+                  backgroundColor: theme.colors.rewardSoft,
+                  borderWidth: theme.borderWidth.hair,
+                  borderColor: theme.colors.reward,
+                }}
+              >
+                <IconBrevet size={20} color={theme.colors.rewardStrong} active />
+                <View style={{ flex: 1 }}>
+                  <Text variant="cartouche" color="rewardStrong">
+                    Brevet
+                  </Text>
+                  <Text variant="label">{brevet.name}</Text>
+                </View>
+                <Text variant="numeralSm" color="rewardStrong" tabular>
+                  +{brevet.reward}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+    </PaperSurface>
   );
 }
 

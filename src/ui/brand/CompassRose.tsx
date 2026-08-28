@@ -6,22 +6,12 @@ import { rhumbLines, roseBranches, roseTicks } from './rose-geometry';
 
 export type CompassRoseProps = {
   size: number;
-  /** Nombre de pointes. Seize pour le décor, huit dès que la rose est petite. */
   points?: 8 | 16;
-  /** Couronne graduée et cercles concentriques. */
   dial?: boolean;
-  /** Trame de rhumbs rayonnante. */
   rhumbs?: boolean;
   opacity?: number;
 };
 
-/**
- * La rose des vents de Portulan.
- *
- * Sa géométrie vient du même module que celui qui génère l'icône du magasin :
- * une rose dessinée deux fois finirait par diverger, et la marque de l'écran
- * d'accueil ne ressemblerait plus à celle de la grille d'applications.
- */
 export function CompassRose({
   size,
   points = 16,
@@ -87,12 +77,9 @@ export function CompassRose({
         </G>
       ) : null}
 
-      {/* Rangs inférieurs d'abord : les cardinales doivent passer devant. */}
       {[...branches]
         .sort((a, b) => b.rank - a.rank)
         .map((branch, i) => {
-          /* Seul le nord est en vermillon : colorer les quatre cardinales
-             ferait un moulin à vent, n'en marquer qu'une oriente la rose. */
           const isNorth = branch.angle === 0;
           return (
             <G key={i}>

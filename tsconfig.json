@@ -2,11 +2,13 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "noUncheckedIndexedAccess": true,
     "paths": {
       "@/*": ["./src/*"]
     }
   },
-  "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts"],
+  "include": ["**/*.ts", "**/*.tsx", "**/*.mts", ".expo/types/**/*.ts", "expo-env.d.ts"],
   "exclude": ["node_modules"]
 }

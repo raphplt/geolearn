@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, InteractionManager, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
   Easing,
+  FadeIn,
+  FadeOut,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
@@ -13,16 +16,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ATLASES } from '@/data';
 import { failure, milestone, success, tap } from '@/fx/haptics';
 import type { Question } from '@/game/questions';
-import { comboMultiplier, currentQuestion, RULES } from '@/game/session';
+import { comboMultiplier, currentQuestion, RULES, summarize } from '@/game/session';
+import type { HintId } from '@/game/economy';
 import { AtlasMap, type TerritoryState } from '@/map/AtlasMap';
+import { assistFrame, highlightFrame } from '@/map/framing';
 import { useProgress } from '@/store/progress';
 import { useSession } from '@/store/session';
 import { useTheme } from '@/theme';
+import { Button } from '@/ui/Button';
 import { CompassRose } from '@/ui/brand/CompassRose';
+import { IconHull } from '@/ui/icons';
+import { Flag } from '@/ui/Flag';
 import { PaperSurface } from '@/ui/PaperSurface';
 import { Text } from '@/ui/Text';
 
-/** Durée d'affichage du verdict avant de passer à la question suivante. */
 const FEEDBACK_MS = { correct: 620, wrong: 1_500 };
 
 type Feedback = {
@@ -37,28 +44,56 @@ export default function Play() {
 
   const session = useSession((s) => s.session);
   const summary = useSession((s) => s.summary);
+  const pending = useSession((s) => s.pending);
+  const startPending = useSession((s) => s.startPending);
   const submit = useSession((s) => s.answer);
   const recordSession = useProgress((s) => s.recordSession);
+  const setReport = useSession((s) => s.setReport);
+
+  const [weighed, setWeighed] = useState(false);
+
+  useEffect(() => {
+    if (!pending) return;
+    const task = InteractionManager.runAfterInteractions(() => startPending());
+    return () => task.cancel();
+  }, [pending, startPending]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setWeighed(true), 620);
+    return () => clearTimeout(timer);
+  }, []);
 
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [dropped, setDropped] = useState<string[]>([]);
+  const [sounded, setSounded] = useState(false);
+  const hints = useProgress((s) => s.purse.hints);
+  const useHint = useProgress((s) => s.useHint);
+  const repair = useSession((s) => s.repair);
   const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recorded = useRef(false);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* Fin de partie : on consigne la progression une seule fois, puis on cède la
-     place à l'écran de bilan. Le garde `recorded` compte : ce composant peut se
-     rendre à nouveau avant la navigation, et sans lui la partie serait comptée
-     deux fois dans les statistiques. */
+  const rescuable =
+    session?.status === 'finished' &&
+    session.endReason === 'wrecked' &&
+    (hints['seconde-chance'] ?? 0) > 0 &&
+    !recorded.current;
+
   useEffect(() => {
     if (!session || session.status !== 'finished' || !summary || recorded.current) return;
+    if (rescuable) return;
     recorded.current = true;
-    recordSession(session, summary);
-    const timer = setTimeout(() => router.replace('/results'), feedback ? 700 : 0);
-    return () => clearTimeout(timer);
-  }, [session, summary, recordSession, feedback]);
+    setReport(recordSession(session, summary));
+    exitTimer.current = setTimeout(() => router.replace('/results'), feedback ? 700 : 0);
+  }, [session, summary, recordSession, setReport, feedback, rescuable]);
 
-  useEffect(() => () => {
-    if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
+      if (exitTimer.current) clearTimeout(exitTimer.current);
+    },
+    [],
+  );
 
   const question = session ? currentQuestion(session) : null;
   const shown = feedback?.question ?? question;
@@ -70,24 +105,68 @@ export default function Play() {
       const correct = chosenId === question.answerId;
       const nextCombo = correct ? session.combo + 1 : 0;
 
-      /* Le retour haptique précède l'animation : c'est lui qui donne la
-         sensation d'immédiateté, et un décalage de quelques images se ressent. */
       if (!correct) failure();
       else if (comboMultiplier(nextCombo) > comboMultiplier(session.combo)) milestone();
       else success();
 
       setFeedback({ question, chosenId, correct });
-      submit(chosenId);
+      const next = submit(chosenId);
+
+      const finished = next?.status === 'finished';
+      if (finished) return;
 
       feedbackTimer.current = setTimeout(
-        () => setFeedback(null),
+        () => {
+          setFeedback(null);
+          setDropped([]);
+          setSounded(false);
+        },
         correct ? FEEDBACK_MS.correct : FEEDBACK_MS.wrong,
       );
     },
     [session, question, feedback, submit],
   );
 
+  const states = useMemo(() => {
+    const out: Record<string, TerritoryState> = {};
+    if (!shown) return out;
+    if (feedback) {
+      out[feedback.question.answerId] = feedback.correct ? 'correct' : 'reveal';
+      if (!feedback.correct && feedback.chosenId) out[feedback.chosenId] = 'wrong';
+    } else if (shown.mode === 'choice' && shown.highlightId) {
+      out[shown.highlightId] = 'target';
+    }
+    return out;
+  }, [feedback, shown]);
+
+  if (pending || !weighed) return <Casting ready={Boolean(session)} />;
+
+  if (session?.status === 'finished' && rescuable) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.canvas }]}>
+        <Wreck
+          onRepair={() => {
+            if (!useHint('seconde-chance')) return;
+            milestone();
+            setFeedback(null);
+            setDropped([]);
+            setSounded(false);
+            repair();
+          }}
+          onGiveUp={() => {
+            tap();
+            if (!session || !summary) return;
+            recorded.current = true;
+            setReport(recordSession(session, summary));
+            router.replace('/results');
+          }}
+        />
+      </View>
+    );
+  }
+
   if (!session || !shown) {
+    if (session) return <Casting ready />;
     return (
       <View style={[styles.centered, { backgroundColor: theme.colors.canvas }]}>
         <Text variant="note" color="textSecondary">
@@ -104,18 +183,13 @@ export default function Play() {
 
   const atlas = ATLASES[shown.atlasId];
 
-  /* États de la carte. Pendant le verdict, on montre à la fois ce que le joueur
-     a désigné et ce qu'il fallait désigner — l'erreur n'apprend rien si l'on ne
-     voit pas le bon territoire à côté du mauvais. */
-  const states: Record<string, TerritoryState> = {};
-  if (feedback) {
-    states[feedback.question.answerId] = feedback.correct ? 'correct' : 'reveal';
-    if (!feedback.correct && feedback.chosenId) states[feedback.chosenId] = 'wrong';
-  } else if (shown.mode === 'choice' && shown.highlightId) {
-    states[shown.highlightId] = 'target';
-  }
-
   const showMap = shown.mode === 'locate' || Boolean(shown.highlightId) || Boolean(feedback);
+
+  const frame = sounded
+    ? assistFrame(atlas, shown.answerId, 0.26)
+    : shown.mode === 'choice'
+      ? highlightFrame(atlas, shown.answerId, session.config.assist)
+      : assistFrame(atlas, shown.answerId, session.config.assist);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
@@ -130,23 +204,44 @@ export default function Play() {
           atlas={atlas}
           states={states}
           onSelect={shown.mode === 'locate' && !feedback ? handleAnswer : undefined}
-          interactive={shown.mode === 'locate'}
-          labelThreshold={0}
-          style={{ flex: 1, marginHorizontal: theme.space.sm }}
+          labels="none"
+          viewBox={frame}
+          style={{ flex: 1, marginHorizontal: theme.space.lg }}
         />
       ) : (
-        /* Les questions sans carte — drapeau, capitale vers pays — laisseraient
-           sinon un grand vide au milieu de l'écran. La rose y tient lieu de
-           filigrane : elle occupe l'espace sans rien réclamer au regard. */
         <View style={styles.emptyStage} pointerEvents="none">
           <CompassRose size={260} points={16} dial opacity={0.08} />
         </View>
       )}
 
+      <HintBar
+        question={shown}
+        held={hints}
+        used={{ dropped: dropped.length > 0, sounded }}
+        locked={Boolean(feedback)}
+        onDrop={() => {
+          if (!useHint('delester')) return;
+          if (shown.mode !== 'choice') return;
+          const wrong = shown.choices.filter((c) => c.id !== shown.answerId).map((c) => c.id);
+          for (let i = wrong.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [wrong[i], wrong[j]] = [wrong[j]!, wrong[i]!];
+          }
+          milestone();
+          setDropped(wrong.slice(0, 2));
+        }}
+        onSound={() => {
+          if (!useHint('sonder')) return;
+          milestone();
+          setSounded(true);
+        }}
+      />
+
       {shown.mode === 'choice' ? (
         <ScrollView
+          style={{ flexGrow: 0 }}
           contentContainerStyle={{
-            padding: theme.space.lg,
+            paddingHorizontal: theme.space.xl,
             paddingBottom: insets.bottom + theme.space.lg,
             gap: theme.space.sm,
           }}
@@ -155,11 +250,12 @@ export default function Play() {
             <ChoiceRow
               key={choice.id}
               label={choice.label}
-              detail={choice.detail}
-              emblem={choice.emblem}
+              flagCode={choice.flagCode}
               state={
                 !feedback
-                  ? 'idle'
+                  ? dropped.includes(choice.id)
+                    ? 'dimmed'
+                    : 'idle'
                   : choice.id === feedback.question.answerId
                     ? 'correct'
                     : choice.id === feedback.chosenId
@@ -167,47 +263,149 @@ export default function Play() {
                       : 'dimmed'
               }
               onPress={() => handleAnswer(choice.id)}
-              disabled={Boolean(feedback)}
+              disabled={Boolean(feedback) || dropped.includes(choice.id)}
             />
           ))}
         </ScrollView>
       ) : (
-        <View style={{ padding: theme.space.lg, paddingBottom: insets.bottom + theme.space.lg }}>
-          <Text variant="caption" color="textTertiary" align="center">
-            Touchez le territoire sur la carte
-          </Text>
-        </View>
+        <View style={{ height: insets.bottom + theme.space.lg }} />
       )}
+
     </View>
   );
 }
 
-/* ───────────────────── En-tête ───────────────────── */
+function HintBar({
+  question,
+  held,
+  used,
+  locked,
+  onDrop,
+  onSound,
+}: {
+  question: Question;
+  held: Partial<Record<HintId, number>>;
+  used: { dropped: boolean; sounded: boolean };
+  locked: boolean;
+  onDrop: () => void;
+  onSound: () => void;
+}) {
+  const theme = useTheme();
+
+  const canDrop =
+    question.mode === 'choice' && !used.dropped && (held.delester ?? 0) > 0 && !locked;
+  const canSound =
+    question.mode === 'locate' && !used.sounded && (held.sonder ?? 0) > 0 && !locked;
+
+  if (!canDrop && !canSound) return null;
+
+  return (
+    <View
+      style={{
+        flexDirection: 'row',
+        gap: theme.space.sm,
+        paddingHorizontal: theme.space.lg,
+        paddingTop: theme.space.sm,
+      }}
+    >
+      {canDrop ? (
+        <HintChip label="Délester" count={held.delester ?? 0} onPress={onDrop} />
+      ) : null}
+      {canSound ? (
+        <HintChip label="Sonder" count={held.sonder ?? 0} onPress={onSound} />
+      ) : null}
+    </View>
+  );
+}
+
+function HintChip({
+  label,
+  count,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${label}, ${count} en réserve`}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: theme.space.xs,
+        paddingHorizontal: theme.space.md,
+        paddingVertical: theme.space.sm,
+        borderRadius: theme.radius.pill,
+        backgroundColor: theme.colors.infoSoft,
+        borderWidth: theme.borderWidth.hair,
+        borderColor: theme.colors.info,
+      }}
+    >
+      <Text variant="labelSm" color="info">
+        {label}
+      </Text>
+      <Text variant="numeralSm" color="info" tabular>
+        ×{count}
+      </Text>
+    </Pressable>
+  );
+}
+
+function Wreck({ onRepair, onGiveUp }: { onRepair: () => void; onGiveUp: () => void }) {
+  const theme = useTheme();
+
+  return (
+    <Animated.View
+      entering={FadeIn.duration(240)}
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          backgroundColor: theme.colors.scrim,
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: theme.space.xl,
+        },
+      ]}
+    >
+      <PaperSurface
+        tone="raised"
+        bordered
+        radius="lg"
+        grain={0.3}
+        elevation="overlay"
+        style={{ padding: theme.space.xl, alignItems: 'center', gap: theme.space.md }}
+      >
+        <IconHull size={40} color={theme.colors.danger} />
+        <Text variant="titleLg" align="center">
+          Coque ouverte
+        </Text>
+        <Button label="Réparer la coque" tone="success" block onPress={onRepair} />
+        <Button label="Rentrer au port" variant="secondary" block onPress={onGiveUp} />
+      </PaperSurface>
+    </Animated.View>
+  );
+}
 
 function SessionHeader() {
   const theme = useTheme();
   const session = useSession((s) => s.session);
   const expireSession = useSession((s) => s.expire);
+  const clearSession = useSession((s) => s.clear);
+  const recordSession = useProgress((s) => s.recordSession);
 
   const progress = useSharedValue(1);
   const expiresAt = session?.expiresAt ?? null;
 
-  /*
-   * Jauge de temps.
-   *
-   * Elle est animée à partir de la seule échéance, sur le fil d'animation :
-   * aucun rendu React ne se produit pendant l'écoulement. Un compte à rebours
-   * qui remonterait dans l'état déclencherait soixante rendus par seconde de
-   * toute la hiérarchie, carte comprise.
-   */
   useEffect(() => {
     if (expiresAt === null) return;
     const remaining = Math.max(0, expiresAt - Date.now());
     progress.value = Math.min(1, remaining / RULES.timeCap);
     progress.value = withTiming(0, { duration: remaining, easing: Easing.linear });
 
-    /* Une minuterie distincte constate l'expiration : l'animation ne peut pas
-       modifier l'état du jeu depuis le fil d'interface utilisateur. */
     const timer = setTimeout(() => expireSession(), remaining);
     return () => clearTimeout(timer);
   }, [expiresAt, progress, expireSession]);
@@ -215,6 +413,37 @@ function SessionHeader() {
   const barStyle = useAnimatedStyle(() => ({
     width: `${Math.max(0, progress.value) * 100}%`,
   }));
+
+  const quit = () => {
+    if (!session) {
+      router.replace('/');
+      return;
+    }
+
+    if (session.answers.length === 0) {
+      clearSession();
+      router.replace('/');
+      return;
+    }
+
+    Alert.alert(
+      'Abandonner la partie ?',
+      'Vos réponses restent acquises. Le score ne sera pas retenu.',
+      [
+        { text: 'Continuer', style: 'cancel' },
+        {
+          text: 'Abandonner',
+          style: 'destructive',
+          onPress: () => {
+            const now = Date.now();
+            recordSession({ ...session, score: 0 }, { ...summarize(session, now), score: 0 }, now);
+            clearSession();
+            router.replace('/');
+          },
+        },
+      ],
+    );
+  };
 
   if (!session) return null;
 
@@ -227,14 +456,14 @@ function SessionHeader() {
         <Pressable
           onPress={() => {
             tap();
-            router.replace('/');
+            quit();
           }}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Abandonner la partie"
         >
-          <Text variant="labelSm" color="textTertiary">
-            Quitter
+          <Text variant="title" color="textTertiary">
+            ✕
           </Text>
         </Pressable>
 
@@ -251,6 +480,21 @@ function SessionHeader() {
 
         <ComboBadge combo={session.combo} multiplier={multiplier} />
       </View>
+
+      {session.config.lives !== undefined ? (
+        <View style={{ flexDirection: 'row', gap: 4, marginTop: theme.space.xs }}>
+          {Array.from({ length: session.config.lives }, (_, i) => (
+            <IconHull
+              key={i}
+              size={15}
+              active={i >= session.wrecks}
+              color={
+                i >= session.wrecks ? theme.colors.textSecondary : theme.colors.dangerSoft
+              }
+            />
+          ))}
+        </View>
+      ) : null}
 
       {expiresAt !== null ? (
         <View
@@ -291,20 +535,11 @@ function ComboBadge({ combo, multiplier }: { combo: number; multiplier: number }
           <Text variant="numeral" color={multiplier > 1 ? 'reward' : 'textSecondary'} tabular>
             ×{multiplier}
           </Text>
-          <Text variant="caption" color="textTertiary" tabular>
-            {combo} d’affilée
-          </Text>
         </>
-      ) : (
-        <Text variant="caption" color="textTertiary">
-          série rompue
-        </Text>
-      )}
+      ) : null}
     </Animated.View>
   );
 }
-
-/* ───────────────────── Question ───────────────────── */
 
 function Prompt({ question, feedback }: { question: Question; feedback: Feedback | null }) {
   const theme = useTheme();
@@ -312,36 +547,49 @@ function Prompt({ question, feedback }: { question: Question; feedback: Feedback
   const verdict = feedback
     ? feedback.correct
       ? { label: 'Juste', color: theme.colors.success }
-      : { label: 'Faux', color: theme.colors.danger }
+      : { label: answerLabel(feedback.question), color: theme.colors.danger }
     : null;
 
   return (
-    <View>
-      <View style={styles.promptHead}>
-        <Text variant="cartouche" color={verdict ? undefined : 'textTertiary'} style={
-          verdict ? { color: verdict.color } : undefined
-        }>
+    <View style={{ alignItems: 'center', gap: theme.space.md }}>
+      <View
+        style={{
+          paddingHorizontal: theme.space.lg,
+          paddingVertical: theme.space.sm,
+          borderRadius: theme.radius.pill,
+          backgroundColor: verdict
+            ? feedback?.correct
+              ? theme.colors.successSoft
+              : theme.colors.dangerSoft
+            : theme.colors.surfaceRaised,
+          borderWidth: theme.borderWidth.hair,
+          borderColor: verdict ? verdict.color : theme.colors.border,
+          maxWidth: '100%',
+        }}
+      >
+        <Text
+          variant="label"
+          align="center"
+          numberOfLines={2}
+          style={verdict ? { color: verdict.color } : undefined}
+        >
           {verdict?.label ?? question.prompt}
         </Text>
       </View>
 
-      {question.subject || question.emblem ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
-          {question.emblem ? <Text style={{ fontSize: 40 }}>{question.emblem}</Text> : null}
-          {question.subject ? (
-            <Text variant="display" style={{ flex: 1 }} numberOfLines={2}>
-              {question.subject}
-            </Text>
-          ) : null}
-        </View>
+      {question.flagCode && !question.subject ? (
+        <Flag cca2={question.flagCode} width={230} height={145} radius={theme.radius.sm} />
       ) : null}
 
-      {/* Après une erreur, on nomme explicitement la bonne réponse : la voir
-          surlignée sur la carte ne suffit pas à la retenir. */}
-      {feedback && !feedback.correct ? (
-        <Text variant="note" color="textSecondary" style={{ marginTop: theme.space.xs }}>
-          {answerLabel(feedback.question)}
-        </Text>
+      {question.subject ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
+          {question.flagCode ? (
+            <Flag cca2={question.flagCode} height={34} radius={theme.radius.xs} />
+          ) : null}
+          <Text variant="display" numberOfLines={2} align="center">
+            {question.subject}
+          </Text>
+        </View>
       ) : null}
     </View>
   );
@@ -350,26 +598,22 @@ function Prompt({ question, feedback }: { question: Question; feedback: Feedback
 function answerLabel(question: Question): string {
   if (question.mode === 'choice') {
     const answer = question.choices.find((c) => c.id === question.answerId);
-    return answer ? `Réponse : ${answer.label}` : '';
+    return answer ? `C’était ${answer.label}` : '';
   }
-  return `Réponse : ${question.subject}`;
+  return `C’était ${question.subject}`;
 }
-
-/* ───────────────────── Propositions ───────────────────── */
 
 type ChoiceState = 'idle' | 'correct' | 'wrong' | 'dimmed';
 
 function ChoiceRow({
   label,
-  detail,
-  emblem,
+  flagCode,
   state,
   onPress,
   disabled,
 }: {
   label: string;
-  detail?: string;
-  emblem?: string;
+  flagCode?: string;
   state: ChoiceState;
   onPress: () => void;
   disabled: boolean;
@@ -383,14 +627,10 @@ function ChoiceRow({
 
   const palette =
     state === 'correct'
-      ? { bg: theme.colors.successSoft, border: theme.colors.success, fg: theme.colors.text }
+      ? { bg: theme.colors.successSoft, border: theme.colors.success }
       : state === 'wrong'
-        ? { bg: theme.colors.dangerSoft, border: theme.colors.danger, fg: theme.colors.text }
-        : {
-            bg: theme.colors.surfaceRaised,
-            border: theme.colors.border,
-            fg: theme.colors.text,
-          };
+        ? { bg: theme.colors.dangerSoft, border: theme.colors.danger }
+        : { bg: theme.colors.surfaceRaised, border: theme.colors.border };
 
   return (
     <Animated.View style={animatedStyle}>
@@ -404,39 +644,53 @@ function ChoiceRow({
           pressed.value = withSpring(0, theme.motion.spring.snappy);
         }}
         accessibilityRole="button"
-        accessibilityLabel={detail ? `${label}, ${detail}` : label}
-        style={{ opacity: state === 'dimmed' ? theme.opacity.disabled : 1 }}
+        accessibilityLabel={label}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: theme.space.md,
+          minHeight: theme.hitTarget.comfortable,
+          paddingHorizontal: theme.space.lg,
+          borderRadius: theme.radius.md,
+          backgroundColor: palette.bg,
+          borderWidth: theme.borderWidth.thin,
+          borderColor: palette.border,
+          opacity: state === 'dimmed' ? theme.opacity.disabled : 1,
+        }}
       >
-        <PaperSurface
-          tone="raised"
-          radius="md"
-          grain={0.25}
-          elevation="sheet"
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            gap: theme.space.md,
-            minHeight: theme.hitTarget.comfortable,
-            paddingHorizontal: theme.space.lg,
-            paddingVertical: theme.space.md,
-            backgroundColor: palette.bg,
-            borderWidth: theme.borderWidth.thin,
-            borderColor: palette.border,
-          }}
-        >
-          {emblem ? <Text style={{ fontSize: 26 }}>{emblem}</Text> : null}
-          <View style={{ flex: 1 }}>
-            <Text variant="label" color={palette.fg}>
-              {label}
-            </Text>
-            {detail ? (
-              <Text variant="caption" color="textTertiary">
-                {detail}
-              </Text>
-            ) : null}
-          </View>
-        </PaperSurface>
+        {flagCode ? <Flag cca2={flagCode} height={22} radius={theme.radius.xs} /> : null}
+        <Text variant="label" style={{ flex: 1 }} numberOfLines={1}>
+          {label}
+        </Text>
       </Pressable>
+    </Animated.View>
+  );
+}
+
+function Casting({ ready }: { ready: boolean }) {
+  const theme = useTheme();
+  const spin = useSharedValue(0);
+
+  useEffect(() => {
+    spin.value = withRepeat(
+      withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.quad) }),
+      -1,
+      false,
+    );
+  }, [spin]);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${spin.value * 360}deg` }],
+  }));
+
+  return (
+    <Animated.View
+      exiting={FadeOut.duration(240)}
+      style={[styles.centered, { backgroundColor: theme.colors.canvas }]}
+    >
+      <Animated.View style={style}>
+        <CompassRose size={112} points={16} dial opacity={ready ? 0.5 : 0.32} />
+      </Animated.View>
     </Animated.View>
   );
 }
@@ -449,6 +703,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     minHeight: 56,
   },
-  promptHead: { minHeight: 20, marginBottom: 4 },
   emptyStage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });

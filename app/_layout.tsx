@@ -1,14 +1,5 @@
 import { useEffect } from 'react';
 import { useColorScheme, View } from 'react-native';
-/*
- * Polices importées par **sous-chemin**, une par une.
- *
- * L'index racine de chaque paquet `@expo-google-fonts` fait un `require` de
- * *toutes* ses graisses — dix-huit pour Fraunces, quatorze pour Spectral. En
- * important depuis la racine, Metro embarquait les cinquante-cinq fichiers, soit
- * 6,4 Mo d'assets pour les dix que l'application utilise réellement. Les
- * sous-chemins ne résolvent qu'un fichier chacun.
- */
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
 import { Fraunces_700Bold_Italic } from '@expo-google-fonts/fraunces/700Bold_Italic';
@@ -48,21 +39,13 @@ export default function RootLayout() {
 
   const hydrated = useProgress((s) => s.hydrated);
   const settings = useProgress((s) => s.settings);
+  const ink = useProgress((s) => s.purse.ink);
   const resolvedScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
   useEffect(() => {
     setHapticsEnabled(settings.haptics);
   }, [settings.haptics]);
 
-  /*
-   * On attend **et** les polices **et** la progression relue.
-   *
-   * Lever l'écran de démarrage dès les polices prêtes ferait apparaître une
-   * série à zéro puis, une fraction de seconde plus tard, la vraie valeur : le
-   * joueur croit un instant avoir tout perdu. Une police manquante n'est en
-   * revanche pas un motif de blocage — mieux vaut un rendu de secours qu'un
-   * écran de démarrage qui ne se lève jamais.
-   */
   const ready = (fontsLoaded || fontError !== null) && hydrated;
 
   useEffect(() => {
@@ -71,29 +54,44 @@ export default function RootLayout() {
 
   if (!ready) return null;
 
-  /* Le fond du conteneur doit résoudre la préférence « système » comme le fait
-     le ThemeProvider : s'en tenir à `settings.scheme` peindrait un fond clair
-     derrière une interface sombre sur un appareil en mode nuit. */
   const scheme = settings.scheme === 'system' ? resolvedScheme : settings.scheme;
   const canvas = colorSchemes[scheme].canvas;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <ThemeProvider preference={settings.scheme}>
+        <ThemeProvider preference={settings.scheme} ink={ink}>
           <View style={{ flex: 1, backgroundColor: canvas }}>
             <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
             <Stack
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: canvas },
-                animation: 'fade',
               }}
             >
-              <Stack.Screen name="index" />
-              <Stack.Screen name="play" options={{ gestureEnabled: false }} />
-              <Stack.Screen name="results" options={{ gestureEnabled: false }} />
-              <Stack.Screen name="atlas" />
+              <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
+
+              <Stack.Screen
+                name="play"
+                options={{ gestureEnabled: false, animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="results"
+                options={{ gestureEnabled: false, animation: 'fade' }}
+              />
+
+              <Stack.Screen name="embarquer" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="decouverte" options={{ animation: 'slide_from_bottom' }} />
+              <Stack.Screen name="comptoir" options={{ animation: 'slide_from_bottom' }} />
+
+              <Stack.Screen
+                name="jaugeage"
+                options={{ gestureEnabled: false, animation: 'slide_from_bottom' }}
+              />
+              <Stack.Screen
+                name="onboarding"
+                options={{ gestureEnabled: false, animation: 'fade' }}
+              />
             </Stack>
           </View>
         </ThemeProvider>
