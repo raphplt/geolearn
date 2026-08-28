@@ -1,24 +1,14 @@
-/**
- * Progression du joueur — persistée localement, sans compte.
- *
- * La v1 n'a ni serveur ni identité : tout ce que le joueur accumule vit dans le
- * stockage de l'appareil. Deux conséquences assumées dans la conception :
- *
- *  · Le format est **versionné et migré**. Une progression de plusieurs mois ne
- *    peut pas être perdue parce qu'un champ a changé de nom ; `migrate` est
- *    l'endroit qui garantit qu'une mise à jour ne remet jamais un joueur à zéro.
- *
- *  · Les cartes de révision sont indexées par identifiant stable
- *    (`atlas:territoire:compétence`), et non par position : réordonner un atlas
- *    ou en ajouter un ne dérange rien.
- */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
-import type { AtlasId } from '@/data';
+import { ATLASES, type AtlasId } from '@/data';
+import { newBrevets, type BrevetContext } from '@/game/brevets';
+import { earningsFor, type Earnings, type HintId, type InkId } from '@/game/economy';
+import { masteryOf, sealedIds } from '@/game/mastery';
 import { dailyKey } from '@/game/rng';
-import { createCard, review, type Card, type CardId } from '@/game/srs';
+import { applyQuestProgress, carnetPayout, questDelta, questsFor } from '@/game/quests';
+import { createCard, review, MASTERED_LEVEL, type Card, type CardId } from '@/game/srs';
 import type { SessionMode, SessionState, SessionSummary } from '@/game/session';
 import type { SchemePreference } from '@/theme';
 
@@ -33,26 +23,51 @@ export type DailyResult = {
 export type Settings = {
   scheme: SchemePreference;
   haptics: boolean;
-  sound: boolean;
-  /** Atlas proposé par défaut à l'ouverture. */
   lastAtlas: AtlasId;
+  floor: number;
+  onboarded: boolean;
 };
 
 export type Records = {
-  /** Meilleur score par atlas et par mode, clef `atlas:mode`. */
   best: Record<string, number>;
   totalAsked: number;
   totalCorrect: number;
   totalSessions: number;
-  /** Temps de jeu cumulé, en millisecondes. */
   totalPlayTime: number;
+  bestCombo: number;
+};
+
+export type Purse = {
+  doublons: number;
+  xp: number;
+  hints: Partial<Record<HintId, number>>;
+  inks: InkId[];
+  ink: InkId;
+};
+
+export type Carnet = {
+  dateKey: string;
+  progress: Record<string, number>;
+  paid: number;
+};
+
+export type SessionReport = {
+  earnings: Earnings;
+  brevets: string[];
+  brevetDoublons: number;
+  carnet: { completed: number; doublons: number };
+  xpBefore: number;
+  xpAfter: number;
 };
 
 type ProgressState = {
   cards: Record<CardId, Card>;
   records: Records;
+  purse: Purse;
+  carnet: Carnet;
+  brevets: Record<string, number>;
+  seals: string[];
   daily: {
-    /** Résultats indexés par date locale (`AAAA-MM-JJ`). */
     results: Record<string, DailyResult>;
     currentStreak: number;
     longestStreak: number;
@@ -61,10 +76,17 @@ type ProgressState = {
   settings: Settings;
   hydrated: boolean;
 
-  reviewCard: (cardId: CardId, correct: boolean, elapsed: number, now?: number) => void;
-  recordSession: (state: SessionState, summary: SessionSummary, now?: number) => void;
+  recordSession: (
+    state: SessionState,
+    summary: SessionSummary,
+    now?: number,
+  ) => SessionReport | null;
   completeDaily: (result: DailyResult, now?: number) => void;
   updateSettings: (patch: Partial<Settings>) => void;
+  buyHint: (id: HintId, price: number) => boolean;
+  useHint: (id: HintId) => boolean;
+  buyInk: (id: InkId, price: number) => boolean;
+  selectInk: (id: InkId) => void;
   resetProgress: () => void;
 };
 
@@ -74,18 +96,23 @@ const emptyRecords = (): Records => ({
   totalCorrect: 0,
   totalSessions: 0,
   totalPlayTime: 0,
+  bestCombo: 0,
 });
+
+const emptyPurse = (): Purse => ({ doublons: 0, xp: 0, hints: {}, inks: ['sepia'], ink: 'sepia' });
+
+const emptyCarnet = (): Carnet => ({ dateKey: dailyKey(), progress: {}, paid: 0 });
 
 const defaultSettings = (): Settings => ({
   scheme: 'system',
   haptics: true,
-  sound: true,
   lastAtlas: 'france-departments',
+  floor: 0,
+  onboarded: false,
 });
 
 export const recordKey = (atlasId: AtlasId, mode: SessionMode): string => `${atlasId}:${mode}`;
 
-/** Veille du jour donné, au format de clé quotidienne — sert au calcul des séries. */
 function previousDayKey(key: string): string {
   const [y, m, d] = key.split('-').map(Number);
   const date = new Date(y!, (m ?? 1) - 1, d ?? 1);
@@ -93,51 +120,120 @@ function previousDayKey(key: string): string {
   return dailyKey(date);
 }
 
+function masteredTotal(cards: Record<CardId, Card>): number {
+  let total = 0;
+  for (const atlasId of Object.keys(ATLASES) as AtlasId[]) {
+    total += masteryOf(cards, atlasId, ATLASES[atlasId]).mastered;
+  }
+  return total;
+}
+
+function allSeals(cards: Record<CardId, Card>): string[] {
+  return (Object.keys(ATLASES) as AtlasId[]).flatMap((atlasId) =>
+    sealedIds(cards, atlasId, ATLASES[atlasId]),
+  );
+}
+
 export const useProgress = create<ProgressState>()(
   persist(
     (set, get) => ({
       cards: {},
       records: emptyRecords(),
+      purse: emptyPurse(),
+      carnet: emptyCarnet(),
+      brevets: {},
+      seals: [],
       daily: { results: {}, currentStreak: 0, longestStreak: 0, lastCompleted: null },
       settings: defaultSettings(),
       hydrated: false,
 
-      reviewCard: (cardId, correct, elapsed, now = Date.now()) =>
-        set((state) => {
-          const existing = state.cards[cardId] ?? createCard(cardId, now);
-          return {
-            cards: { ...state.cards, [cardId]: review(existing, { correct, elapsed }, now) },
-          };
-        }),
-
       recordSession: (session, summary, now = Date.now()) => {
-        /* Les cartes sont mises à jour d'abord, une par une : c'est la
-           progression réelle du joueur, indépendante du score affiché. */
-        for (const a of session.answers) {
-          get().reviewCard(a.cardId, a.correct, a.elapsed, now);
+        const state = get();
+        if (summary.asked === 0) return null;
+
+        const cards = { ...state.cards };
+        let promotions = 0;
+
+        for (const answer of session.answers) {
+          const before = cards[answer.cardId] ?? createCard(answer.cardId, now);
+          const after = review(before, { correct: answer.correct, elapsed: answer.elapsed }, now);
+          if (after.level > before.level) promotions++;
+          cards[answer.cardId] = after;
         }
 
-        set((state) => {
-          const key = recordKey(session.config.atlasId, session.config.mode);
-          return {
-            records: {
-              best: {
-                ...state.records.best,
-                [key]: Math.max(state.records.best[key] ?? 0, summary.score),
-              },
-              totalAsked: state.records.totalAsked + summary.asked,
-              totalCorrect: state.records.totalCorrect + summary.correct,
-              totalSessions: state.records.totalSessions + 1,
-              totalPlayTime: state.records.totalPlayTime + summary.duration,
+        const masteredBefore = masteredTotal(state.cards);
+        const masteredAfter = masteredTotal(cards);
+        const masteries = Math.max(0, masteredAfter - masteredBefore);
+
+        const sealsAfter = allSeals(cards);
+        const freshSeals = sealsAfter.filter((id) => !state.seals.includes(id));
+
+        const learning = { promotions, masteries, seals: freshSeals.length };
+
+        const earnings = earningsFor(session.config.mode, summary, learning);
+
+        const today = dailyKey(new Date(now));
+        const carnetBase =
+          state.carnet.dateKey === today ? state.carnet : { dateKey: today, progress: {}, paid: 0 };
+        const carnetProgress = applyQuestProgress(
+          carnetBase.progress,
+          today,
+          questDelta(session.config.mode, summary, learning),
+        );
+        const payout = carnetPayout(questsFor(today, carnetProgress), carnetBase.paid);
+
+        const bestCombo = Math.max(state.records.bestCombo, summary.bestCombo);
+        const xpAfter = state.purse.xp + earnings.xp;
+        const context: BrevetContext = {
+          cards,
+          xp: xpAfter,
+          longestStreak: state.daily.longestStreak,
+          bestExpedition: state.records.best[recordKey(session.config.atlasId, 'expedition')] ?? 0,
+          floor: state.settings.floor,
+          bestCombo,
+        };
+        const brevets = newBrevets(context, state.brevets);
+
+        const key = recordKey(session.config.atlasId, session.config.mode);
+        const brevetDates = { ...state.brevets };
+        for (const id of brevets.ids) brevetDates[id] = now;
+
+        set({
+          cards,
+          seals: sealsAfter,
+          brevets: brevetDates,
+          records: {
+            best: {
+              ...state.records.best,
+              [key]: Math.max(state.records.best[key] ?? 0, summary.score),
             },
-          };
+            totalAsked: state.records.totalAsked + summary.asked,
+            totalCorrect: state.records.totalCorrect + summary.correct,
+            totalSessions: state.records.totalSessions + 1,
+            totalPlayTime: state.records.totalPlayTime + summary.duration,
+            bestCombo,
+          },
+          purse: {
+            ...state.purse,
+            doublons:
+              state.purse.doublons + earnings.doublons + payout.doublons + brevets.doublons,
+            xp: xpAfter,
+          },
+          carnet: { dateKey: today, progress: carnetProgress, paid: payout.completed },
         });
+
+        return {
+          earnings,
+          brevets: brevets.ids,
+          brevetDoublons: brevets.doublons,
+          carnet: { completed: payout.completed, doublons: payout.doublons },
+          xpBefore: state.purse.xp,
+          xpAfter,
+        };
       },
 
       completeDaily: (result) =>
         set((state) => {
-          /* Rejouer un relevé déjà terminé ne doit ni gonfler la série ni
-             écraser le résultat : le relevé du jour n'a qu'une seule prise. */
           if (state.daily.results[result.dateKey]) return state;
 
           const continues = state.daily.lastCompleted === previousDayKey(result.dateKey);
@@ -156,47 +252,118 @@ export const useProgress = create<ProgressState>()(
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
 
+      buyHint: (id, price) => {
+        const { purse } = get();
+        if (purse.doublons < price) return false;
+        set({
+          purse: {
+            ...purse,
+            doublons: purse.doublons - price,
+            hints: { ...purse.hints, [id]: (purse.hints[id] ?? 0) + 1 },
+          },
+        });
+        return true;
+      },
+
+      useHint: (id) => {
+        const { purse } = get();
+        const held = purse.hints[id] ?? 0;
+        if (held <= 0) return false;
+        set({ purse: { ...purse, hints: { ...purse.hints, [id]: held - 1 } } });
+        return true;
+      },
+
+      buyInk: (id, price) => {
+        const { purse } = get();
+        if (purse.inks.includes(id) || purse.doublons < price) return false;
+        set({ purse: { ...purse, doublons: purse.doublons - price, inks: [...purse.inks, id], ink: id } });
+        return true;
+      },
+
+      selectInk: (id) =>
+        set((state) =>
+          state.purse.inks.includes(id) ? { purse: { ...state.purse, ink: id } } : state,
+        ),
+
       resetProgress: () =>
         set({
           cards: {},
           records: emptyRecords(),
+          purse: emptyPurse(),
+          carnet: emptyCarnet(),
+          brevets: {},
+          seals: [],
           daily: { results: {}, currentStreak: 0, longestStreak: 0, lastCompleted: null },
         }),
     }),
     {
       name: 'portulan.progress',
-      version: 1,
+      version: 5,
       storage: createJSONStorage(() => AsyncStorage),
-      /* `hydrated` décrit l'état du chargement, pas la progression : le persister
-         ferait démarrer l'application en se croyant déjà chargée. */
       partialize: ({ hydrated: _hydrated, ...rest }) => rest,
       migrate: (persisted, version) => {
-        /* Aucune migration à ce jour ; le point d'entrée existe pour que la
-           première évolution de schéma n'ait pas à réinventer ce câblage. */
-        void version;
-        return persisted as ProgressState;
+        const state = persisted as ProgressState;
+
+        let next = state;
+        if (version < 3) {
+          const { sound: _sound, ...settings } = (state.settings ?? {}) as Settings & {
+            sound?: boolean;
+          };
+          next = {
+            ...next,
+            settings: { ...defaultSettings(), ...settings, onboarded: false },
+          } as ProgressState;
+        }
+
+        if (version < 5) {
+          const legacy = (next.settings as unknown as { level?: string })?.level;
+          const floor = legacy === 'confirme' ? 4 : legacy === 'notions' ? 2 : 0;
+          const { level: _level, ...settings } = (next.settings ?? {}) as Settings & {
+            level?: string;
+          };
+          next = { ...next, settings: { ...defaultSettings(), ...settings, floor } } as ProgressState;
+        }
+
+        if (version < 4) {
+          const cards = next.cards ?? {};
+          const context: BrevetContext = {
+            cards,
+            xp: 0,
+            longestStreak: next.daily?.longestStreak ?? 0,
+            bestExpedition: 0,
+            floor: next.settings?.floor ?? 0,
+            bestCombo: 0,
+          };
+          const already: Record<string, number> = {};
+          const now = Date.now();
+          for (const id of newBrevets(context, {}).ids) already[id] = now;
+
+          next = {
+            ...next,
+            purse: emptyPurse(),
+            carnet: emptyCarnet(),
+            brevets: already,
+            seals: allSeals(cards),
+            records: { ...emptyRecords(), ...next.records },
+          } as ProgressState;
+        }
+
+        return next;
       },
     },
   ),
 );
 
-/*
- * Fanion de chargement.
- *
- * L'interface ne doit rien peindre avant que la progression soit relue : afficher
- * « série : 0 » puis « série : 12 » un instant plus tard donne l'impression que
- * l'application a perdu les données du joueur. On s'abonne à la fin de
- * réhydratation, **et** on teste `hasHydrated()` dans la foulée : sur un
- * stockage rapide, la réhydratation peut être terminée avant même que l'abonnement
- * soit posé, auquel cas l'événement ne se déclencherait jamais.
- */
 useProgress.persist.onFinishHydration(() => useProgress.setState({ hydrated: true }));
 if (useProgress.persist.hasHydrated()) useProgress.setState({ hydrated: true });
-
-/* ───────────────────────── Sélecteurs ───────────────────────── */
 
 export const selectDailyDone = (state: ProgressState, key = dailyKey()): boolean =>
   Boolean(state.daily.results[key]);
 
 export const selectAccuracy = (state: ProgressState): number =>
   state.records.totalAsked === 0 ? 0 : state.records.totalCorrect / state.records.totalAsked;
+
+export const questsOf = (carnet: Carnet, key = dailyKey()) =>
+  questsFor(key, carnet.dateKey === key ? carnet.progress : {});
+
+export const selectMasteredLevel = MASTERED_LEVEL;
