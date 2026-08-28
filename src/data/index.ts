@@ -1,10 +1,3 @@
-/**
- * Point d'accès unique aux atlas embarqués.
- *
- * Les JSON sont importés statiquement : Metro les inclut au paquet, ce qui rend
- * l'application entièrement jouable hors ligne et supprime tout état de
- * chargement au démarrage — la carte est peinte au premier rendu.
- */
 import franceDepartments from './france-departments.json';
 import worldCountries from './world-countries.json';
 import type { FranceAtlas, WorldAtlas } from './types';

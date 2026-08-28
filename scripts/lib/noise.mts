@@ -1,14 +1,4 @@
-/**
- * Bruit de valeur **carrelable**, pour les textures de papier.
- *
- * Le carrelage n'est pas un détail : la texture est répétée sur toute la
- * surface de l'écran, et la moindre discontinuité au raccord dessine une grille
- * visible qui trahit immédiatement l'artifice. La continuité est garantie en
- * indexant le treillis modulo sa taille, de sorte que le bord droit interpole
- * vers le bord gauche.
- */
 
-/** Générateur pseudo-aléatoire déterministe : les assets doivent être reproductibles. */
 export function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
@@ -19,10 +9,8 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Interpolation en S : annule la dérivée aux nœuds, ce qui efface le maillage. */
 const smootherstep = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);
 
-/** Une octave de bruit de valeur sur un treillis de `cells`×`cells`, carrelable. */
 function octave(size: number, cells: number, rand: () => number): Float32Array {
   const lattice = new Float32Array(cells * cells);
   for (let i = 0; i < lattice.length; i++) lattice[i] = rand();
@@ -50,11 +38,6 @@ function octave(size: number, cells: number, rand: () => number): Float32Array {
   return out;
 }
 
-/**
- * Bruit fractal (somme d'octaves), normalisé sur [0, 1].
- *
- * @param baseCells Treillis de la première octave. Doit diviser `size` pour rester carrelable.
- */
 export function fbm(
   size: number,
   { octaves = 5, baseCells = 4, gain = 0.5, seed = 1 } = {},
@@ -76,7 +59,6 @@ export function fbm(
   return out;
 }
 
-/** Bruit blanc par pixel — le grain fin des fibres, que le fBm ne produit pas. */
 export function whiteNoise(size: number, seed: number): Float32Array {
   const rand = mulberry32(seed);
   const out = new Float32Array(size * size);

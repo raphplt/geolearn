@@ -1,14 +1,3 @@
-/**
- * Contrôle d'intégrité des atlas produits par `build-geo`.
- *
- *   npx tsx scripts/verify-geo.mts
- *
- * Le pipeline enchaîne simplification topologique, projection, encodage relatif
- * et jointures sur trois sources distinctes. Chacune de ces étapes peut échouer
- * silencieusement — un cartouche vide, une étiquette dans la mer, un voisin qui
- * n'existe pas — sans qu'aucune exception ne soit levée. Ce script transforme
- * ces défaillances muettes en échecs bruyants.
- */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -28,7 +17,6 @@ function check(condition: boolean, message: string, detail?: string): void {
   console.error(`  ✗ ${message}${detail ? `\n      ${detail}` : ''}`);
 }
 
-/** Marge de tolérance : l'encodage entier peut décaler un sommet d'un demi-quantum. */
 const EPS = 1.5;
 
 const inside = ([x, y]: [number, number], [x0, y0, x1, y1]: BBox, slack = EPS): boolean =>
@@ -103,12 +91,11 @@ function verifyCommon(atlas: FranceAtlas | WorldAtlas): void {
     }
   }
 
-  /* Symétrie du voisinage : si A borde B, B borde A. */
   const byId = new Map(atlas.territories.map((t) => [t.id, t]));
   for (const t of atlas.territories) {
     for (const n of t.neighbors) {
       const other = byId.get(n);
-      if (!other) continue; /* voisin hors atlas (pays non retenu) — toléré */
+      if (!other) continue;
       check(
         other.neighbors.includes(t.id),
         `${atlas.id} : relation de voisinage symétrique`,
@@ -173,7 +160,6 @@ function verifyFrance(atlas: FranceAtlas): void {
     }
   }
 
-  /* Aucun cartouche ne doit chevaucher le corps de la carte ni un autre cartouche. */
   const frames = atlas.insets.map((i) => i.frame);
   for (let i = 0; i < frames.length; i++) {
     for (let j = i + 1; j < frames.length; j++) {
@@ -211,7 +197,6 @@ function verifyWorld(atlas: WorldAtlas): void {
   const withShape = atlas.territories.filter((t) => t.d !== '').length;
   check(withShape >= 165, 'Monde : contours disponibles pour l’essentiel des pays', `${withShape}`);
 
-  /* Quelques repères connus, pour détecter une jointure ou une projection cassée. */
   const spot: [string, string, string][] = [
     ['FRA', 'France', 'Paris'],
     ['JPN', 'Japon', 'Tokyo'],
@@ -239,9 +224,41 @@ const world = JSON.parse(
   readFileSync(join(DATA_DIR, 'world-countries.json'), 'utf8'),
 ) as WorldAtlas;
 
+function verifySilhouettes(): void {
+  console.log('\n▸ Silhouettes');
+
+  for (const [name, atlas] of [
+    ['France', france],
+    ['Monde', world],
+  ] as [string, FranceAtlas | WorldAtlas][]) {
+    const points = decodeRelativePath(atlas.outline);
+    check(
+      points.length > 2_000,
+      `${name} — la silhouette est un littoral, pas un cadre`,
+      `${points.length} sommets`,
+    );
+
+    const outside = points.filter(
+      ([x, y]) => x < -1 || x > atlas.width + 1 || y < -1 || y > atlas.height + 1,
+    );
+    check(outside.length === 0, `${name} — la silhouette tient dans l’atlas`, `${outside.length} sommets dehors`);
+    console.log(`  · ${name} : ${points.length.toLocaleString('fr-FR')} sommets`);
+  }
+
+  check(
+    typeof world.frame === 'string' && world.frame.length > 0,
+    'le monde garde le cadre de sa projection',
+  );
+  check(
+    france.frame === undefined,
+    'la conique conforme française n’a pas de cadre naturel',
+  );
+}
+
 console.log('Vérification des atlas');
 verifyFrance(france);
 verifyWorld(world);
+verifySilhouettes();
 
 console.log(
   `\n${failures === 0 ? '✓' : '✗'} ${checks - failures}/${checks} contrôles passés\n`,

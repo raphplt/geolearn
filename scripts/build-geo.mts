@@ -1,14 +1,3 @@
-/**
- * Construit les jeux de données géographiques embarqués dans l'application.
- *
- *   pnpm geo:build
- *
- * Le principe directeur : **tout ce qui peut être calculé à la compilation
- * doit l'être**. Projection, simplification, calcul des voisins, placement des
- * étiquettes — tout est résolu ici. L'application ne reçoit que des chaînes de
- * tracé SVG prêtes à peindre, ce qui lui évite d'embarquer d3 et lui permet
- * d'afficher une carte au premier rendu, sans travail de mise en page.
- */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -31,7 +20,9 @@ import {
   UN_MEMBERSHIP_OVERRIDES,
 } from './lib/corrections.mts';
 import { fetchJson, mapLimit } from './lib/fetch-cache.mts';
+import { decodePath } from '../src/map/geometry.ts';
 import {
+  dissolveRings,
   encodeRelativePath,
   mainRingsOf,
   poleOfInaccessibility,
@@ -49,7 +40,11 @@ import type {
 
 const OUT_DIR = join(import.meta.dirname, '..', 'src', 'data');
 
-/* ─────────────────────────── Sources ─────────────────────────── */
+const flatToRing = (flat: Float64Array): [number, number][] => {
+  const ring: [number, number][] = [];
+  for (let i = 0; i < flat.length; i += 2) ring.push([flat[i]!, flat[i + 1]!]);
+  return ring;
+};
 
 const SRC = {
   departments:
@@ -61,9 +56,6 @@ const SRC = {
   countries:
     'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson',
   countryMeta: 'https://raw.githubusercontent.com/mledoze/countries/master/countries.json',
-  /* mledoze ne porte pas la population. La Banque mondiale la donne pour 260
-     pays, millésimée, sans clé d'API — c'est la source la plus fiable et la
-     plus stable pour ce chiffre. */
   population:
     'https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL?format=json&mrnev=1&per_page=400',
 };
@@ -75,42 +67,21 @@ const ATTRIBUTION = {
     'Contours : Natural Earth (domaine public). Métadonnées : mledoze/countries (ODbL). Populations : Banque mondiale (SP.POP.TOTL, CC BY 4.0).',
 };
 
-/* ───────────────────── Géométrie de l'atlas ───────────────────── */
-
-/**
- * Largeur du viewBox de l'atlas.
- *
- * 4000 et non 1000 : les tracés sont encodés en coordonnées entières relatives
- * (voir `encodeRelativePath`), et il faut donc que l'unité entière soit plus
- * fine que le pixel au zoom maximal. À 4000 unités pour ~1100 km de France,
- * une unité vaut ~275 m — invisible même en zoomant à fond sur le Territoire
- * de Belfort.
- */
 const ATLAS_WIDTH = 4000;
 const PAD = 80;
-/** Hauteur de la bande de cartouches accueillant les départements d'outre-mer. */
 const INSET_ROW_HEIGHT = 600;
 const INSET_GAP = 40;
-/** Marge intérieure d'un cartouche, pour que le trait ne touche pas le cadre. */
 const INSET_PAD = 48;
 
-/**
- * Tolérance de simplification, en degrés carrés (aire d'un triangle Visvalingam).
- * Calibrée à l'œil sur un écran de téléphone : en dessous, on ne distingue plus
- * la différence ; au-dessus, la Bretagne perd ses pointes et la Corse s'arrondit.
- */
 const TOLERANCE = {
   france: Number(process.env.TOL_FR ?? 3e-5),
   world: Number(process.env.TOL_WORLD ?? 8e-4),
 };
 
-/* ────────────────────────── Utilitaires ────────────────────────── */
-
 type AnyFeature<P> = Feature<Geometry, P>;
 
 const path = (projection: GeoProjection) => geoPath(projection);
 
-/** Recadre une projection pour que l'objet remplisse `frame` en conservant ses proportions. */
 function fitInto(projection: GeoProjection, frame: BBox, object: object): void {
   const [x0, y0, x1, y1] = frame;
   projection.fitExtent(
@@ -127,16 +98,8 @@ function bboxOf(projection: GeoProjection, f: AnyFeature<unknown>): BBox {
   return [round(x0), round(y0), round(x1), round(y1)];
 }
 
-/** L'espace atlas est entier : toutes les coordonnées émises le sont aussi. */
 const round = (n: number): number => Math.round(n);
 
-/**
- * Ancre d'étiquette d'un territoire, en coordonnées atlas.
- *
- * Calculée sur le plus grand polygone uniquement : sans cela, l'étiquette de la
- * France atterrirait au milieu de l'Atlantique, à mi-chemin entre la métropole
- * et ses îles.
- */
 function labelAnchor(projection: GeoProjection, geometry: Geometry): Point {
   const rings = mainRingsOf(geometry);
   if (rings.length === 0) return [0, 0];
@@ -152,15 +115,12 @@ function labelAnchor(projection: GeoProjection, geometry: Geometry): Point {
   return [round(x), round(y)];
 }
 
-/** Aire projetée, en unités atlas². Sert à calibrer la difficulté et l'épaisseur du trait. */
 function projectedArea(projection: GeoProjection, f: AnyFeature<unknown>): number {
   return round(path(projection).area(f as never));
 }
 
 const isPolygonal = (g: Geometry | null): g is Polygon | MultiPolygon =>
   g?.type === 'Polygon' || g?.type === 'MultiPolygon';
-
-/* ═══════════════════════════ FRANCE ═══════════════════════════ */
 
 type DeptProps = { code: string; nom: string };
 type DeptMeta = { nom: string; code: string; codeRegion: string; chefLieu: string };
@@ -172,7 +132,6 @@ type CommuneMeta = {
   population?: number;
 };
 
-/** Départements et collectivités rendus dans un cartouche, dans l'ordre d'affichage. */
 const OVERSEAS_ORDER = ['971', '972', '973', '974', '976'] as const;
 
 async function buildFrance(): Promise<FranceAtlas> {
@@ -190,15 +149,12 @@ async function buildFrance(): Promise<FranceAtlas> {
 
   console.log(`  · ${source.features.length} départements, ${regions.length} régions`);
 
-  /* Chefs-lieux : une requête par département, mémorisée sur disque. */
   const communes = await mapLimit(meta, 6, (m) =>
     fetchJson<CommuneMeta>(SRC.commune(m.chefLieu), `fr-commune-${m.chefLieu}.json`),
   );
   const prefectureByDept = new Map(meta.map((m, i) => [m.code, communes[i]!]));
   console.log(`  · ${communes.length} chefs-lieux résolus`);
 
-  /* Simplification topologique sur l'ensemble des 101 : les frontières internes
-     sont partagées, elles doivent être simplifiées une seule fois. */
   const { features, neighborIndices } = simplifyPreservingTopology(
     source.features,
     TOLERANCE.france,
@@ -215,16 +171,10 @@ async function buildFrance(): Promise<FranceAtlas> {
     features: metroFeatures as Feature[],
   };
 
-  /* ── Cadre principal : la métropole en projection conique conforme ──
-     Parallèles 44°/49° et méridien d'origine 3°E : les paramètres du Lambert
-     français. C'est la projection sous laquelle tout le monde a appris cette
-     forme d'hexagone — en utiliser une autre la rendrait subtilement fausse. */
   const metro = geoConicConformal().parallels([44, 49]).rotate([-3, 0]);
   const mainFrame: BBox = [PAD, PAD, ATLAS_WIDTH - PAD, ATLAS_WIDTH - PAD];
   fitInto(metro, mainFrame, metroCollection);
 
-  /* La métropole ne remplit pas un carré : on resserre le cadre sur son emprise
-     réelle et on recentre, pour ne pas laisser de vide en haut et en bas. */
   const [[mx0, my0], [mx1, my1]] = path(metro).bounds(metroCollection as never);
   const mainHeight = my1 - my0 + PAD * 2;
   metro.translate([
@@ -233,10 +183,6 @@ async function buildFrance(): Promise<FranceAtlas> {
   ]);
   const tightMainFrame: BBox = [0, 0, ATLAS_WIDTH, round(mainHeight)];
 
-  /* ── Cartouches d'outre-mer ──
-     Les DOM sont à des milliers de kilomètres : les placer à leur position
-     réelle rendrait la métropole minuscule. La tradition cartographique — et
-     notre direction artistique — veut qu'ils soient encadrés en marge. */
   const insetTop = mainHeight;
   const slotWidth =
     (ATLAS_WIDTH - PAD * 2 - INSET_GAP * (OVERSEAS_ORDER.length - 1)) / OVERSEAS_ORDER.length;
@@ -255,7 +201,6 @@ async function buildFrance(): Promise<FranceAtlas> {
 
   const atlasHeight = round(insetTop + INSET_ROW_HEIGHT + PAD);
 
-  /* Chaque cartouche a sa propre projection, à sa propre échelle. */
   const projectionFor = (code: string): GeoProjection => {
     const inset = insetById.get(code);
     if (!inset) return metro;
@@ -301,15 +246,8 @@ async function buildFrance(): Promise<FranceAtlas> {
     .filter((t): t is Department => t !== null)
     .sort((a, b) => a.id.localeCompare(b.id, 'fr', { numeric: true }));
 
-  /* Silhouette : le contour extérieur de la métropole, sans les frontières
-     internes. Sert au halo côtier et à l'ombre portée de la feuille. */
   const outline = encodeRelativePath(path(metro)(metroCollection as never) ?? '');
 
-  /* Graticule borné à la métropole. Un `geoGraticule10()` global projeté en
-     conique conforme diverge à l'infini loin du cône de tangence : on obtenait
-     un tracé de 100 Ko s'étendant sur un milliard d'unités, entièrement hors
-     champ. On génère donc la grille sur la seule emprise utile, au pas de 2°
-     — assez serré pour habiller la carte, assez lâche pour rester discret. */
   const graticule = encodeRelativePath(
     path(metro)(
       geoGraticule()
@@ -336,8 +274,6 @@ async function buildFrance(): Promise<FranceAtlas> {
     attribution: ATTRIBUTION.france,
   };
 }
-
-/* ═══════════════════════════ MONDE ═══════════════════════════ */
 
 type NeProps = {
   ISO_A3: string;
@@ -367,9 +303,6 @@ type MledozeCountry = {
 
 type WorldBankRow = { countryiso3code: string; date: string; value: number | null };
 
-
-
-/** Le code ISO le plus fiable disponible sur une entité Natural Earth. */
 function isoOf(p: NeProps): string {
   for (const candidate of [p.ISO_A3, p.ISO_A3_EH, p.ADM0_A3]) {
     if (candidate && candidate !== '-99') return candidate;
@@ -405,12 +338,6 @@ async function buildWorld(): Promise<WorldAtlas> {
 
   const { features } = simplifyPreservingTopology(source.features, TOLERANCE.world);
 
-  /* ── Projection Natural Earth 1 ──
-     Compromis délibéré. Mercator serait historiquement juste pour un portulan
-     — les lignes de rhumb y sont droites — mais elle triple la taille apparente
-     du Groenland. Dans une application qui *enseigne* la géographie, on ne peut
-     pas apprendre une fausse notion de surface au joueur. Les lignes de rhumb
-     restent décoratives ; la perception des aires, elle, reste honnête. */
   const world = geoNaturalEarth1();
   const sphere = { type: 'Sphere' } as const;
   fitInto(world, [PAD, PAD, ATLAS_WIDTH - PAD, ATLAS_WIDTH - PAD], sphere);
@@ -429,18 +356,9 @@ async function buildWorld(): Promise<WorldAtlas> {
     if (iso) geometryByIso.set(iso, f);
   });
 
-  /* Un pays est retenu s'il est membre de l'ONU, ou s'il possède une géométrie
-     dans Natural Earth (ce qui rattrape le Vatican, la Palestine, le Kosovo…). */
   const selected = meta.filter((m) => m.unMember || geometryByIso.has(m.cca3));
   const selectedIsos = new Set(selected.map((m) => m.cca3));
 
-  /* ── Graphe des frontières terrestres ──
-     Les listes de mledoze sont asymétriques par endroits : le Sri Lanka déclare
-     borner l'Inde (au titre de la frontière maritime du détroit de Palk) alors
-     que l'Inde ne déclare pas le Sri Lanka. On rend la relation mutuelle, faute
-     de quoi un « quels pays bordent X ? » se contredirait selon le sens de la
-     question. On n'utilise **pas** l'adjacence calculée sur la topologie : à
-     l'échelle 1:110 000 000, deux côtes séparées par un détroit se touchent. */
   const borderGraph = new Map<string, Set<string>>();
   const link = (a: string, b: string): void => {
     if (a === b || !selectedIsos.has(a) || !selectedIsos.has(b)) return;
@@ -462,8 +380,6 @@ async function buildWorld(): Promise<WorldAtlas> {
       const population = populationByIso.get(m.cca3) ?? 0;
       const unMember = UN_MEMBERSHIP_OVERRIDES[m.cca3] ?? m.unMember;
 
-      /* Sans géométrie (micro-États absents du 110m), le pays reste jouable :
-         il est repéré par un point à sa position réelle plutôt que par sa forme. */
       if (!f || !isPolygonal(f.geometry)) {
         const projected = world([m.latlng[1], m.latlng[0]]);
         const label: Point = projected ? [round(projected[0]), round(projected[1])] : [0, 0];
@@ -526,13 +442,14 @@ async function buildWorld(): Promise<WorldAtlas> {
     mainFrame: [0, 0, ATLAS_WIDTH, worldHeight],
     insets: [],
     territories,
-    outline: encodeRelativePath(path(world)(sphere as never) ?? ''),
+    outline: dissolveRings(
+      territories.flatMap((t) => (t.d ? decodePath(t.d).map(flatToRing) : [])),
+    ),
+    frame: encodeRelativePath(path(world)(sphere as never) ?? ''),
     graticule: encodeRelativePath(path(world)(geoGraticule10()) ?? ''),
     attribution: ATTRIBUTION.world,
   };
 }
-
-/* ═══════════════════════════ Écriture ═══════════════════════════ */
 
 function emit(name: string, data: unknown): void {
   mkdirSync(OUT_DIR, { recursive: true });

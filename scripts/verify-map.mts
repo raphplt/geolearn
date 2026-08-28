@@ -1,14 +1,3 @@
-/**
- * Contrôle du moteur de pointé sur les données réelles.
- *
- *   npx tsx scripts/verify-map.mts
- *
- * L'invariant vérifié est simple et très contraignant : **l'ancre d'étiquette
- * d'un territoire doit désigner ce territoire**. Il met en cause d'un coup le
- * décodeur de tracés, la sémantique de `closepath`, le test d'appartenance
- * pair-impair et le placement des ancres calculé à la compilation. S'il tient
- * sur 101 départements et 174 pays, les quatre sont corrects.
- */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -42,14 +31,12 @@ function verifyAtlas<T extends Territory>(atlas: Atlas<T>): void {
     `  · index construit en ${buildMs.toFixed(0)} ms — ${index.entries.length} contours, ${rings} anneaux, ${vertices.toLocaleString('fr-FR')} sommets`,
   );
 
-  /* 1. Chaque tracé non vide doit produire au moins un anneau exploitable. */
   for (const t of atlas.territories) {
     if (!t.d) continue;
     checks++;
     if (decodePath(t.d).length === 0) fail(`${t.id} (${t.name}) : tracé non décodable en anneaux`);
   }
 
-  /* 2. L'invariant central : l'ancre désigne son propre territoire. */
   const misses: string[] = [];
   for (const t of atlas.territories) {
     if (!t.d) continue;
@@ -63,7 +50,6 @@ function verifyAtlas<T extends Territory>(atlas: Atlas<T>): void {
     if (misses.length > 12) console.error(`      … et ${misses.length - 12} de plus`);
   }
 
-  /* 3. Cohérence directe entre appartenance et pointé. */
   for (const t of atlas.territories.slice(0, 40)) {
     if (!t.d) continue;
     checks++;
@@ -77,16 +63,13 @@ function verifyAtlas<T extends Territory>(atlas: Atlas<T>): void {
     }
   }
 
-  /* 4. Un point manifestement hors de l'atlas ne doit désigner personne. */
   checks++;
   if (hitTest(index, -9999, -9999) !== null) fail('un point hors atlas désigne un territoire');
 
-  /* 5. Le rattrapage au plus proche doit rester borné par sa tolérance. */
   checks++;
   const farAway = hitTest(index, -5000, -5000, { tolerance: 100 });
   if (farAway !== null) fail(`rattrapage hors tolérance : ${farAway}`);
 
-  /* 6. Performance du pointé : c'est un chemin appelé à chaque toucher. */
   const samples = atlas.territories.filter((t) => t.d).slice(0, 200);
   const t0 = performance.now();
   for (const t of samples) hitTest(index, t.label[0], t.label[1], { tolerance: 60 });
@@ -103,9 +86,6 @@ console.log('Vérification du moteur de carte');
 verifyAtlas(france);
 verifyAtlas(world);
 
-/* Le chef-lieu doit tomber dans son département : contrôle croisé entre les
-   données géographiques et les données administratives, deux sources
-   indépendantes qui n'ont aucune raison de coïncider si le pipeline dérape. */
 console.log('\n▸ Recoupement chefs-lieux × contours');
 const index = buildHitIndex(france);
 const wrong: string[] = [];

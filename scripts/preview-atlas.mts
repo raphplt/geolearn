@@ -1,13 +1,3 @@
-/**
- * Rend les atlas en SVG pour contrôle visuel.
- *
- *   npx tsx scripts/preview-atlas.mts [dossier]
- *
- * Un jeu de données géographiques peut satisfaire toutes les assertions
- * automatiques et rester visuellement faux : une île à l'envers, une étiquette
- * dans la mer, un cartouche vide. Ce script existe pour qu'on puisse *regarder*
- * le résultat du pipeline plutôt que de lui faire confiance.
- */
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -44,7 +34,6 @@ function renderAtlas(
   );
   parts.push(`<rect width="${width}" height="${height}" fill="${C.paper}"/>`);
 
-  /* Mer : la silhouette d'ensemble, épaissie, donne le halo côtier. */
   if (atlas.outline) {
     parts.push(
       `<path d="${atlas.outline}" fill="none" stroke="${C.water}" stroke-width="26" stroke-linejoin="round" opacity="0.9"/>`,
@@ -57,7 +46,6 @@ function renderAtlas(
     );
   }
 
-  /* Cartouches d'outre-mer. */
   for (const inset of atlas.insets) {
     const [x0, y0, x1, y1] = inset.frame;
     parts.push(
@@ -66,7 +54,6 @@ function renderAtlas(
     );
   }
 
-  /* Territoires. */
   for (const t of atlas.territories as Territory[]) {
     if (!t.d) continue;
     parts.push(

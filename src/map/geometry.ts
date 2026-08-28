@@ -1,17 +1,5 @@
-/**
- * Géométrie de la carte côté application : décodage des tracés et pointé.
- *
- * Les atlas sont livrés en commandes SVG relatives à coordonnées entières (voir
- * `scripts/lib/geo-utils.mts`). C'est parfait pour peindre — react-native-svg
- * les consomme telles quelles — mais illisible pour savoir *quel territoire a
- * été touché*. Ce module reconstruit à la demande les anneaux de polygones, et
- * les met en cache : le décodage des 101 départements coûte quelques
- * millisecondes, une seule fois par atlas.
- */
 import type { Atlas, BBox, Point, Territory } from '@/data/types';
 
-/** Anneau polygonal aplati : [x0, y0, x1, y1, …]. Un tableau plat par anneau plutôt
- *  qu'un tableau de paires — trois fois moins d'objets à allouer. */
 export type Ring = Float64Array;
 
 export type TerritoryGeometry = {
@@ -21,14 +9,6 @@ export type TerritoryGeometry = {
   label: Point;
 };
 
-/**
- * Reconstruit les anneaux d'un tracé relatif.
- *
- * Reproduit fidèlement la sémantique SVG de `z`, qui ramène le point courant au
- * **début du sous-tracé** et non à l'endroit où le tracé s'est arrêté. Un
- * décodeur qui l'ignore place correctement le continent puis décale chaque île
- * qui le suit.
- */
 export function decodePath(d: string): Ring[] {
   const rings: Ring[] = [];
   if (!d) return rings;
@@ -75,13 +55,6 @@ export function decodePath(d: string): Ring[] {
   return rings;
 }
 
-/**
- * Appartenance d'un point à un ensemble d'anneaux, règle pair-impair.
- *
- * La règle pair-impair traite gratuitement les deux cas qui nous occupent : les
- * archipels (chaque île bascule l'état, donc un point sur n'importe laquelle
- * compte) et les enclaves (un anneau intérieur exclut sa surface).
- */
 export function pointInRings(px: number, py: number, rings: readonly Ring[]): boolean {
   let inside = false;
   for (const ring of rings) {
@@ -102,11 +75,9 @@ export function pointInRings(px: number, py: number, rings: readonly Ring[]): bo
 const inBBox = (px: number, py: number, [x0, y0, x1, y1]: BBox, slack = 0): boolean =>
   px >= x0 - slack && px <= x1 + slack && py >= y0 - slack && py <= y1 + slack;
 
-/** Index de pointé d'un atlas. Construit une fois, réutilisé pour toutes les parties. */
 export type HitIndex = {
   atlasId: string;
   entries: TerritoryGeometry[];
-  /** Territoires sans contour (micro-États repérés par un point seul). */
   pointOnly: TerritoryGeometry[];
 };
 
@@ -135,25 +106,10 @@ export function buildHitIndex<T extends Territory>(atlas: Atlas<T>): HitIndex {
 }
 
 export type HitOptions = {
-  /**
-   * Rayon de rattrapage, en unités atlas. Un doigt couvre une surface bien plus
-   * large qu'un département comme le Val-de-Marne : sans tolérance, ces
-   * territoires seraient injouables sans zoomer. En deçà de ce rayon, on
-   * rattache le toucher au territoire le plus proche.
-   */
   tolerance?: number;
-  /** Restreint la recherche à ces identifiants (par exemple les territoires encore en jeu). */
   candidates?: ReadonlySet<string>;
 };
 
-/**
- * Territoire touché en un point de l'espace atlas.
- *
- * Deux passes délibérément ordonnées : d'abord le test d'appartenance exact,
- * pour qu'un toucher franc dans un grand territoire ne soit jamais volé par un
- * petit voisin ; ensuite seulement le rattrapage au plus proche, qui rend
- * jouables les territoires minuscules.
- */
 export function hitTest(
   index: HitIndex,
   px: number,
@@ -173,8 +129,6 @@ export function hitTest(
   let best: string | null = null;
   let bestDistance = tolerance;
 
-  /* Les territoires sans contour ne sont atteignables *que* par ce rattrapage :
-     on les mesure depuis leur point, les autres depuis leur emprise. */
   for (const entry of index.pointOnly) {
     if (!eligible(entry.id)) continue;
     const distance = Math.hypot(px - entry.label[0], py - entry.label[1]);
@@ -197,13 +151,6 @@ export function hitTest(
   return best;
 }
 
-/**
- * Distance d'un point au bord le plus proche d'un ensemble d'anneaux.
- *
- * `ceiling` permet d'abandonner dès qu'on sait qu'un candidat ne peut plus
- * gagner : sur un atlas mondial, cela évite de parcourir les 40 000 segments de
- * la Russie pour un toucher qui se trouve en Belgique.
- */
 function distanceToRings(px: number, py: number, rings: readonly Ring[], ceiling: number): number {
   let min = ceiling;
   for (const ring of rings) {
@@ -232,7 +179,6 @@ function distanceToSegment(
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-/** Emprise élargie d'une marge relative — utilisée pour cadrer sur un territoire. */
 export function padBBox([x0, y0, x1, y1]: BBox, ratio: number): BBox {
   const w = x1 - x0;
   const h = y1 - y0;
@@ -241,7 +187,6 @@ export function padBBox([x0, y0, x1, y1]: BBox, ratio: number): BBox {
   return [x0 - px, y0 - py, x1 + px, y1 + py];
 }
 
-/** Emprise englobant plusieurs emprises. */
 export function unionBBox(boxes: readonly BBox[]): BBox {
   let x0 = Infinity;
   let y0 = Infinity;
