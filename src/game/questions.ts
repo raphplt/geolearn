@@ -1,81 +1,41 @@
-/**
- * Fabrique de questions.
- *
- * Le cœur du sujet n'est pas de tirer une bonne réponse au hasard — c'est de
- * choisir de **bons leurres**. Un quiz dont les mauvaises réponses sont tirées
- * uniformément s'élimine de tête sans rien savoir : demander le chef-lieu de la
- * Corrèze parmi « Tulle, Tokyo, Lille, Ajaccio » ne teste rien. Les leurres
- * doivent être exactement assez proches pour qu'il faille *savoir*.
- *
- * On pondère donc les candidats par leur confusibilité réelle, puis on tire
- * dedans — sans jamais rendre le piège certain, faute de quoi le joueur
- * apprendrait à reconnaître le piège plutôt que la réponse.
- */
 import type { Country, Department, Territory } from '@/data/types';
 import { FRANCE, WORLD, type AtlasId } from '@/data';
 import { weightedSample, shuffle, sample } from './rng';
 import type { CardId } from './srs';
 
 export type Skill =
-  /* Désigner un territoire sur la carte. */
   | 'locate'
-  /* Nommer un territoire mis en évidence sur la carte. */
   | 'name'
-  /* France : département → chef-lieu, et réciproque. */
   | 'prefecture'
   | 'prefectureToDept'
-  /* France : département → numéro. */
   | 'code'
-  /* Monde : pays → capitale, et réciproque. */
   | 'capital'
   | 'capitalToCountry'
-  /* Monde : drapeau → pays. */
   | 'flag';
 
 export type Choice = {
   id: string;
   label: string;
-  /** Ligne secondaire : région d'un département, continent d'un pays. */
   detail?: string;
-  /** Emoji drapeau, pour les questions du mode Monde. */
-  emblem?: string;
+  flagCode?: string;
 };
 
 export type Question = {
-  /** Identifiant d'instance — change à chaque tirage. */
   id: string;
-  /** Carte de révision mise en jeu. */
   cardId: CardId;
   atlasId: AtlasId;
   skill: Skill;
-  /**
-   * Consigne affichée, **grammaticalement autonome**.
-   *
-   * Elle ne se raccorde jamais au sujet pour former une phrase : « Quel est le
-   * chef-lieu de » + « Loiret » donnerait « de Loiret » au lieu de « du
-   * Loiret », et il faudrait connaître le genre et l'initiale des 101
-   * départements et des 193 pays pour bien élider. On pose donc le sujet en
-   * vedette au-dessus, et la consigne le reprend par un possessif — « son
-   * chef-lieu », « sa capitale » — qui s'accorde avec le nom commun et reste
-   * juste quel que soit le territoire.
-   */
   prompt: string;
-  /** Sujet de la question, posé en vedette typographique au-dessus de la consigne. */
   subject: string;
-  /** Emoji accompagnant le sujet (drapeau). */
-  emblem?: string;
-  /** Identifiant du territoire attendu. */
+  flagCode?: string;
   answerId: string;
 } & (
   | {
-      /** On répond en touchant la carte. */
       mode: 'locate';
     }
   | {
-      /** On répond en choisissant une proposition. */
       mode: 'choice';
       choices: Choice[];
-      /** Territoire à mettre en évidence sur la carte pendant la question. */
       highlightId?: string;
     }
 );
@@ -83,7 +43,6 @@ export type Question = {
 export const cardIdFor = (atlasId: AtlasId, territoryId: string, skill: Skill): CardId =>
   `${atlasId}:${territoryId}:${skill}`;
 
-/** Décompose un identifiant de carte. Renvoie `null` si la carte est d'un format obsolète. */
 export function parseCardId(
   cardId: CardId,
 ): { atlasId: AtlasId; territoryId: string; skill: Skill } | null {
@@ -93,17 +52,6 @@ export function parseCardId(
   return { atlasId, territoryId, skill };
 }
 
-/* ───────────────────── Confusibilité ───────────────────── */
-
-/**
- * Jetons significatifs d'un nom de territoire.
- *
- * Les noms de départements français sont massivement composés — Haute-Loire,
- * Loire-Atlantique, Saône-et-Loire, Loiret. Un joueur ne les confond pas au
- * hasard : il les confond *parce qu'ils partagent un mot*. On extrait donc les
- * composants pour pouvoir sur-pondérer ces voisins-là, qui sont les leurres les
- * plus instructifs qui soient.
- */
 const NAME_STOPWORDS = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'et', 'sur', 'd', 'l']);
 
 function nameTokens(name: string): Set<string> {
@@ -133,27 +81,17 @@ function sharesToken(a: string, b: string): boolean {
   return false;
 }
 
-/**
- * Poids de confusibilité d'un candidat face à la bonne réponse.
- *
- * L'échelle est multiplicative et volontairement large : un département
- * limitrophe au nom apparenté doit sortir bien plus souvent qu'un département à
- * l'autre bout du pays, sans pour autant que ce dernier ne sorte jamais — c'est
- * cette part d'imprévu qui empêche le joueur de répondre par élimination.
- */
 function confusability(target: Territory, candidate: Territory, sameGroup: boolean): number {
   let weight = 1;
   if (target.neighbors.includes(candidate.id)) weight *= 6;
   if (sameGroup) weight *= 3;
   if (sharesToken(target.name, candidate.name)) weight *= 5;
 
-  /* Une taille comparable rend deux territoires confusibles sur la carte. */
   if (target.area > 0 && candidate.area > 0) {
     const ratio = target.area / candidate.area;
     if (ratio > 0.5 && ratio < 2) weight *= 1.8;
   }
 
-  /* La proximité géographique compte même sans frontière commune. */
   const distance = Math.hypot(
     target.label[0] - candidate.label[0],
     target.label[1] - candidate.label[1],
@@ -180,8 +118,6 @@ function pickDistractors<T extends Territory>(
     rng,
   );
 }
-
-/* ───────────────────── Fabriques ───────────────────── */
 
 const CHOICE_COUNT = 4;
 
@@ -282,8 +218,6 @@ function departmentQuestion(
 }
 
 function countryQuestion(target: Country, skill: Skill, rng: () => number): Built {
-  /* Seuls les États membres de l'ONU sont interrogeables : proposer le Sahara
-     occidental ou l'Antarctique comme « pays » serait une erreur factuelle. */
   const pool = WORLD.territories.filter((c) => c.unMember);
   const distractors = pickDistractors(target, pool, (c) => c.subregion, CHOICE_COUNT - 1, rng);
   const base = {
@@ -301,7 +235,7 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
         mode: 'locate',
         prompt: 'Trouvez ce pays',
         subject: target.name,
-        emblem: target.flag,
+        flagCode: target.cca2,
       };
 
     case 'name':
@@ -327,8 +261,8 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
         mode: 'choice',
         prompt: 'Quelle est sa capitale ?',
         subject: target.name,
-        emblem: target.flag,
-        highlightId: target.id,
+        flagCode: target.cca2,
+        highlightId: target.d === '' ? undefined : target.id,
         choices: shuffle(
           [target, ...distractors].map((c) => ({ id: c.id, label: c.capital, detail: c.subregion })),
           rng,
@@ -345,7 +279,7 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
           [target, ...distractors].map((c) => ({
             id: c.id,
             label: c.name,
-            emblem: c.flag,
+            flagCode: c.cca2,
             detail: c.subregion,
           })),
           rng,
@@ -358,7 +292,7 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
         mode: 'choice',
         prompt: 'À quel pays appartient ce drapeau ?',
         subject: '',
-        emblem: target.flag,
+        flagCode: target.cca2,
         choices: shuffle(
           [target, ...distractors].map((c) => ({ id: c.id, label: c.name, detail: c.subregion })),
           rng,
@@ -370,19 +304,27 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
   }
 }
 
-/** Compétences disponibles pour chaque atlas, dans l'ordre de difficulté croissante. */
 export const SKILLS_BY_ATLAS: Record<AtlasId, readonly Skill[]> = {
   'france-departments': ['name', 'locate', 'prefecture', 'code', 'prefectureToDept'],
   'world-countries': ['flag', 'name', 'locate', 'capital', 'capitalToCountry'],
 };
 
-/** Territoires interrogeables d'un atlas : ceux qui ont un contour et un statut légitime. */
+export const SKILL_NEEDS_SHAPE: Record<Skill, boolean> = {
+  locate: true,
+  name: true,
+  prefecture: true,
+  prefectureToDept: false,
+  code: false,
+  capital: false,
+  capitalToCountry: false,
+  flag: false,
+};
+
 export function playablePool(atlasId: AtlasId): (Department | Country)[] {
   if (atlasId === 'france-departments') return FRANCE.territories;
-  return WORLD.territories.filter((c) => c.unMember && c.d !== '');
+  return WORLD.territories.filter((c) => c.unMember);
 }
 
-/** Construit une question pour un territoire et une compétence donnés. */
 export function buildQuestion(
   atlasId: AtlasId,
   territoryId: string,
@@ -395,22 +337,19 @@ export function buildQuestion(
   }
   const target = WORLD.territories.find((c) => c.id === territoryId);
   if (!target || !target.unMember) return null;
-  /* Une capitale manquante rendrait la question insoluble. */
   if ((skill === 'capital' || skill === 'capitalToCountry') && !target.capital) return null;
+  if (SKILL_NEEDS_SHAPE[skill] && target.d === '') return null;
   return countryQuestion(target, skill, rng);
 }
 
-/** Tire une question au hasard dans un atlas, en respectant les compétences autorisées. */
 export function randomQuestion(
   atlasId: AtlasId,
   rng: () => number,
   allowedSkills: readonly Skill[] = SKILLS_BY_ATLAS[atlasId],
+  pool: readonly { id: string }[] = playablePool(atlasId),
 ): Question | null {
-  const pool = playablePool(atlasId);
   if (pool.length === 0 || allowedSkills.length === 0) return null;
 
-  /* Quelques tentatives : une compétence peut ne pas s'appliquer à un
-     territoire donné (pays sans capitale renseignée, par exemple). */
   for (let attempt = 0; attempt < 8; attempt++) {
     const [target] = sample(pool, 1, rng);
     const [skill] = sample(allowedSkills, 1, rng);
