@@ -431,13 +431,18 @@ export const selectDailyDone = (state: ProgressState, key = dailyKey()): boolean
 export const selectFloor = (state: ProgressState, atlasId: AtlasId): number =>
   state.settings.floors?.[atlasId] ?? 0;
 
-/** The studied atlases, the one on screen first. */
-export const selectStudying = (state: ProgressState): AtlasId[] => {
-  const studying = state.settings.studying?.length
-    ? state.settings.studying
-    : [state.settings.lastAtlas];
+/**
+ * The studied atlases, the one on screen first.
+ *
+ * Deliberately not a store selector: it builds a new array, and a selector
+ * passed to the store is read through `useSyncExternalStore`, which compares
+ * snapshots by identity and loops for ever on a fresh one. Anything derived
+ * that is not a primitive belongs in a `useMemo` on the caller's side.
+ */
+export const studiedAtlases = (settings: Settings): AtlasId[] => {
+  const studying = settings.studying?.length ? settings.studying : [settings.lastAtlas];
   return [...studying].sort(
-    (a, b) => Number(b === state.settings.lastAtlas) - Number(a === state.settings.lastAtlas),
+    (a, b) => Number(b === settings.lastAtlas) - Number(a === settings.lastAtlas),
   );
 };
 

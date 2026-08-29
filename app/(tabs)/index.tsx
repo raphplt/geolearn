@@ -11,7 +11,7 @@ import { plans, recommended, type PlanId } from '@/game/plan';
 import { dailyKey } from '@/game/rng';
 import { tap } from '@/fx/haptics';
 import { AtlasSilhouette } from '@/map/AtlasSilhouette';
-import { selectDailyDone, selectStudying, useProgress } from '@/store/progress';
+import { selectDailyDone, studiedAtlases, useProgress } from '@/store/progress';
 import { useSession } from '@/store/session';
 import { useTheme } from '@/theme';
 import { Button } from '@/ui/Button';
@@ -41,7 +41,7 @@ export default function Cap() {
   const atlasId = settings.lastAtlas;
   const atlas = ATLASES[atlasId];
   const floors = settings.floors;
-  const studying = useProgress(selectStudying);
+  const studying = useMemo(() => studiedAtlases(settings), [settings]);
   const floor = floors[atlasId] ?? 0;
   const dailyDone = useProgress((s) => selectDailyDone(s, dailyKey()));
 

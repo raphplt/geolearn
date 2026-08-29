@@ -12,7 +12,7 @@ import { emojiSummary } from '@/game/session';
 import {
   recordKey,
   selectDailyDone,
-  selectStudying,
+  studiedAtlases,
   useProgress,
   type SessionReport,
 } from '@/store/progress';
@@ -41,8 +41,9 @@ export default function Results() {
   const best = useProgress((s) => s.records.best);
   const streak = useProgress((s) => s.daily.currentStreak);
   const cards = useProgress((s) => s.cards);
-  const floors = useProgress((s) => s.settings.floors);
-  const studying = useProgress(selectStudying);
+  const settings = useProgress((s) => s.settings);
+  const floors = settings.floors;
+  const studying = useMemo(() => studiedAtlases(settings), [settings]);
   const dailyDone = useProgress((s) => selectDailyDone(s, dailyKey()));
 
   const launch = useLaunch();

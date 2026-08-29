@@ -55,7 +55,7 @@ export default function Jaugeage() {
   const atlas = ATLASES[atlasId];
 
   /* The generator belongs to the run: replacing one replaces the other. */
-  const [run, setRun] = useState(() => open(atlasId));
+  const [run, setRun] = useState(() => openRun(atlasId));
   const { state, question } = run;
 
   const [picked, setPicked] = useState<string | null>(null);
@@ -121,7 +121,7 @@ export default function Jaugeage() {
 
     bar.value = 0;
     setAt(step);
-    setRun(open(nextAtlas));
+    setRun(openRun(nextAtlas));
     setPicked(null);
     setFloorResult(null);
   }, [setFloor, atlasId, floor, at, queue, bar, leave]);
@@ -272,7 +272,7 @@ const asAtlas = (value: string | undefined): AtlasId | null =>
 type Run = { rng: () => number; state: Calibration; question: Question | null };
 
 /** One gauging run: its generator, its state, and the question on screen. */
-function open(atlasId: AtlasId): Run {
+function openRun(atlasId: AtlasId): Run {
   const rng = createRng(seedFrom(`jaugeage:${atlasId}:${Date.now()}`));
   const state = startCalibration(atlasId);
   return { rng, state, question: nextQuestion(state, rng) };
