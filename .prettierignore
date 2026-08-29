@@ -1,0 +1,11 @@
+android
+.expo
+dist
+node_modules
+pnpm-lock.yaml
+package-lock.json
+src/data/*.json
+
+# Généré par `pnpm flags:build` : le formateur ne doit pas diverger du générateur.
+src/data/flags.ts
+assets

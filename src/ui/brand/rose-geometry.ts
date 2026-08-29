@@ -1,4 +1,3 @@
-
 export type RoseBranch = {
   light: string;
   dark: string;
@@ -34,8 +33,7 @@ export function roseBranches(count: 8 | 16, opts: RoseOptions): RoseBranch[] {
   for (let i = 0; i < count; i++) {
     const angle = i * step;
 
-    const rank: 0 | 1 | 2 =
-      i % (count / 4) === 0 ? 0 : count === 16 && i % 2 === 0 ? 1 : 2;
+    const rank: 0 | 1 | 2 = i % (count / 4) === 0 ? 0 : count === 16 && i % 2 === 0 ? 1 : 2;
 
     const tipRadius = rank === 0 ? radius : radius * falloff[rank - 1]!;
     const baseRadius = hubRadius * (rank === 0 ? 1 : rank === 1 ? 0.78 : 0.55);

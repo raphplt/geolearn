@@ -2,13 +2,7 @@ import { createRng } from './rng';
 import type { SessionMode, SessionSummary } from './session';
 import type { LearningDelta } from './economy';
 
-export type QuestKind =
-  | 'correct'
-  | 'combo'
-  | 'mastery'
-  | 'promotion'
-  | 'sessions'
-  | 'score';
+export type QuestKind = 'correct' | 'combo' | 'mastery' | 'promotion' | 'sessions' | 'score';
 
 export type QuestTemplate = {
   kind: QuestKind;

@@ -125,10 +125,7 @@ const rendered = screensUnder(join(ROOT, 'app'));
 check(rendered.length >= 5, 'les écrans sont bien tous visités', `${rendered.length} trouvés`);
 for (const file of rendered) {
   const text = readFileSync(file, 'utf8');
-  check(
-    !/\.flag\b/.test(text),
-    `${file.slice(ROOT.length + 1)} n’affiche pas l’émoji des données`,
-  );
+  check(!/\.flag\b/.test(text), `${file.slice(ROOT.length + 1)} n’affiche pas l’émoji des données`);
 }
 
 console.log(`\n${failures === 0 ? '✓' : '✗'} ${checks - failures} / ${checks} contrôles passés\n`);

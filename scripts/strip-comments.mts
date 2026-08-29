@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import ts from 'typescript';
 
@@ -83,4 +83,6 @@ for (const target of TARGETS) {
   }
 }
 
-console.log(`${touched} fichiers nettoyés, ${(removed / 1024).toFixed(0)} Ko de commentaires retirés`);
+console.log(
+  `${touched} fichiers nettoyés, ${(removed / 1024).toFixed(0)} Ko de commentaires retirés`,
+);

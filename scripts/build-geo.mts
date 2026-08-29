@@ -161,7 +161,10 @@ async function buildFrance(): Promise<FranceAtlas> {
   );
   const codes = features.map((f) => f.properties.code);
   const neighborsByIndex = neighborIndices.map((list) =>
-    list.map((i) => codes[i]!).filter(Boolean).sort(),
+    list
+      .map((i) => codes[i]!)
+      .filter(Boolean)
+      .sort(),
   );
 
   const overseas = new Set<string>(OVERSEAS_ORDER);
@@ -344,10 +347,7 @@ async function buildWorld(): Promise<WorldAtlas> {
 
   const [[wx0, wy0], [wx1, wy1]] = path(world).bounds(sphere as never);
   const worldHeight = round(wy1 - wy0 + PAD * 2);
-  world.translate([
-    world.translate()[0] - wx0 + PAD,
-    world.translate()[1] - wy0 + PAD,
-  ]);
+  world.translate([world.translate()[0] - wx0 + PAD, world.translate()[1] - wy0 + PAD]);
   void wx1;
 
   const geometryByIso = new Map<string, AnyFeature<NeProps>>();

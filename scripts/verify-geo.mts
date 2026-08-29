@@ -61,9 +61,7 @@ function verifyCommon(atlas: FranceAtlas | WorldAtlas): void {
       const decoded = bboxOfPath(t.d);
       check(decoded !== null, `${atlas.id}/${t.id} : tracé décodable`);
       if (decoded) {
-        const drift = Math.max(
-          ...decoded.map((v, i) => Math.abs(v - (t.bbox[i] as number))),
-        );
+        const drift = Math.max(...decoded.map((v, i) => Math.abs(v - (t.bbox[i] as number))));
         check(
           drift <= EPS,
           `${atlas.id}/${t.id} : le tracé encodé coïncide avec sa bbox`,
@@ -84,10 +82,7 @@ function verifyCommon(atlas: FranceAtlas | WorldAtlas): void {
     }
 
     for (const n of t.neighbors) {
-      check(
-        n !== t.id,
-        `${atlas.id}/${t.id} : un territoire n'est pas son propre voisin`,
-      );
+      check(n !== t.id, `${atlas.id}/${t.id} : un territoire n'est pas son propre voisin`);
     }
   }
 
@@ -241,7 +236,11 @@ function verifySilhouettes(): void {
     const outside = points.filter(
       ([x, y]) => x < -1 || x > atlas.width + 1 || y < -1 || y > atlas.height + 1,
     );
-    check(outside.length === 0, `${name} — la silhouette tient dans l’atlas`, `${outside.length} sommets dehors`);
+    check(
+      outside.length === 0,
+      `${name} — la silhouette tient dans l’atlas`,
+      `${outside.length} sommets dehors`,
+    );
     console.log(`  · ${name} : ${points.length.toLocaleString('fr-FR')} sommets`);
   }
 
@@ -249,10 +248,7 @@ function verifySilhouettes(): void {
     typeof world.frame === 'string' && world.frame.length > 0,
     'le monde garde le cadre de sa projection',
   );
-  check(
-    france.frame === undefined,
-    'la conique conforme française n’a pas de cadre naturel',
-  );
+  check(france.frame === undefined, 'la conique conforme française n’a pas de cadre naturel');
 }
 
 console.log('Vérification des atlas');
@@ -260,7 +256,5 @@ verifyFrance(france);
 verifyWorld(world);
 verifySilhouettes();
 
-console.log(
-  `\n${failures === 0 ? '✓' : '✗'} ${checks - failures}/${checks} contrôles passés\n`,
-);
+console.log(`\n${failures === 0 ? '✓' : '✗'} ${checks - failures}/${checks} contrôles passés\n`);
 process.exit(failures === 0 ? 0 : 1);

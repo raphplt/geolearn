@@ -15,6 +15,10 @@ nodeLinker: hoisted
 # la raison. esbuild est tiré par tsx, qui exécute les scripts de `scripts/`.
 allowBuilds:
   esbuild: true
+  # Résolveur natif d'eslint-import-resolver-typescript. Non compilé : la règle
+  # `import/no-unresolved` est désactivée (TypeScript la couvre déjà, et mieux),
+  # et ESLint tourne sans lui.
+  unrs-resolver: false
 
 minimumReleaseAgeExclude:
   - expo-dev-client@57.0.16

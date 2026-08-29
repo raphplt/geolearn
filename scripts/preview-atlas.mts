@@ -100,10 +100,22 @@ const france = load<FranceAtlas>('france-departments.json');
 const world = load<WorldAtlas>('world-countries.json');
 
 const outputs: [string, string][] = [
-  ['france-plain.svg', renderAtlas(france, { showLabels: false, showAnchors: false, showPrefectures: false })],
-  ['france-annotated.svg', renderAtlas(france, { showLabels: true, showAnchors: true, showPrefectures: true })],
-  ['world-plain.svg', renderAtlas(world, { showLabels: false, showAnchors: false, showPrefectures: false })],
-  ['world-annotated.svg', renderAtlas(world, { showLabels: true, showAnchors: true, showPrefectures: false })],
+  [
+    'france-plain.svg',
+    renderAtlas(france, { showLabels: false, showAnchors: false, showPrefectures: false }),
+  ],
+  [
+    'france-annotated.svg',
+    renderAtlas(france, { showLabels: true, showAnchors: true, showPrefectures: true }),
+  ],
+  [
+    'world-plain.svg',
+    renderAtlas(world, { showLabels: false, showAnchors: false, showPrefectures: false }),
+  ],
+  [
+    'world-annotated.svg',
+    renderAtlas(world, { showLabels: true, showAnchors: true, showPrefectures: false }),
+  ],
 ];
 
 for (const [name, svg] of outputs) {

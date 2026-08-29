@@ -1,4 +1,3 @@
-
 export const UN_MEMBERSHIP_OVERRIDES: Record<string, boolean> = { VAT: false };
 
 export const POPULATION_EXEMPT = new Set(['VAT']);
