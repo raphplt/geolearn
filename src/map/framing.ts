@@ -5,11 +5,7 @@ const centerOf = (bbox: BBox): [number, number] => [
   (bbox[1] + bbox[3]) / 2,
 ];
 
-function frameAround(
-  atlas: Atlas<Territory>,
-  center: [number, number],
-  width: number,
-): BBox {
+function frameAround(atlas: Atlas<Territory>, center: [number, number], width: number): BBox {
   const w = Math.min(atlas.width, Math.max(1, width));
   const h = w * (atlas.height / atlas.width);
 
@@ -28,7 +24,10 @@ export function assistFrame(
   const territory = atlas.territories.find((t) => t.id === territoryId);
   if (!territory || territory.d === '') return undefined;
 
-  const own = Math.max(territory.bbox[2] - territory.bbox[0], territory.bbox[3] - territory.bbox[1]);
+  const own = Math.max(
+    territory.bbox[2] - territory.bbox[0],
+    territory.bbox[3] - territory.bbox[1],
+  );
   const width = Math.max(atlas.width * spread, own * 3.2);
   const height = width * (atlas.height / atlas.width);
 
@@ -57,7 +56,10 @@ export function focusFrame(atlas: Atlas<Territory>, territoryId: string): BBox |
   const territory = atlas.territories.find((t) => t.id === territoryId);
   if (!territory || territory.d === '') return undefined;
 
-  const own = Math.max(territory.bbox[2] - territory.bbox[0], territory.bbox[3] - territory.bbox[1]);
+  const own = Math.max(
+    territory.bbox[2] - territory.bbox[0],
+    territory.bbox[3] - territory.bbox[1],
+  );
   return frameAround(atlas, centerOf(territory.bbox), Math.min(atlas.width, own * 2.6));
 }
 
@@ -77,9 +79,5 @@ export function highlightFrame(
   );
   if (own / atlas.width >= SMALL_SHARE) return assistFrame(atlas, territoryId, spread);
 
-  return frameAround(
-    atlas,
-    centerOf(territory.bbox),
-    Math.max(own * 4, atlas.width * 0.18),
-  );
+  return frameAround(atlas, centerOf(territory.bbox), Math.max(own * 4, atlas.width * 0.18));
 }

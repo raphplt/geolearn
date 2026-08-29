@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useColorScheme, View } from 'react-native';
+import { AppState, useColorScheme, View } from 'react-native';
 import { Fraunces_600SemiBold } from '@expo-google-fonts/fraunces/600SemiBold';
 import { Fraunces_700Bold } from '@expo-google-fonts/fraunces/700Bold';
 import { Fraunces_700Bold_Italic } from '@expo-google-fonts/fraunces/700Bold_Italic';
@@ -18,8 +18,11 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { setHapticsEnabled } from '@/fx/haptics';
+import { probe } from '@/fx/probe';
 import { useProgress } from '@/store/progress';
-import { colorSchemes, ThemeProvider } from '@/theme';
+import { useSession } from '@/store/session';
+import { colorSchemes, motion, ThemeProvider } from '@/theme';
+import { ProbeOverlay } from '@/ui/Probe';
 
 void SplashScreen.preventAutoHideAsync();
 
@@ -42,9 +45,34 @@ export default function RootLayout() {
   const ink = useProgress((s) => s.purse.ink);
   const resolvedScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
 
+  const loadResumable = useSession((s) => s.loadResumable);
+  const suspendSession = useSession((s) => s.suspend);
+  const wakeSession = useSession((s) => s.wake);
+
   useEffect(() => {
     setHapticsEnabled(settings.haptics);
   }, [settings.haptics]);
+
+  useEffect(() => {
+    void loadResumable();
+  }, [loadResumable]);
+
+  useEffect(() => {
+    probe.enable(settings.probe);
+  }, [settings.probe]);
+
+  /*
+   * A game is not played while the application is in the background. Without
+   * this, a phone call in the middle of an expedition emptied the time bank in
+   * silence, and the player came back to a game they had already lost.
+   */
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') wakeSession();
+      else suspendSession();
+    });
+    return () => subscription.remove();
+  }, [suspendSession, wakeSession]);
 
   const ready = (fontsLoaded || fontError !== null) && hydrated;
 
@@ -67,32 +95,37 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: canvas },
+                animation: 'slide_from_right',
+                animationDuration: motion.duration.emphasis,
               }}
             >
+              {/* Tabs are persistent: returning to one never replays anything. */}
               <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
 
+              {/* Immersive: the game takes the whole screen and owns its exit. */}
+              <Stack.Screen name="play" options={{ gestureEnabled: false, animation: 'fade' }} />
               <Stack.Screen
-                name="play"
-                options={{ gestureEnabled: false, animation: 'slide_from_bottom' }}
+                name="decouverte"
+                options={{ gestureEnabled: false, animation: 'fade' }}
               />
               <Stack.Screen
                 name="results"
-                options={{ gestureEnabled: false, animation: 'fade' }}
+                options={{ gestureEnabled: false, animation: 'slide_from_right' }}
               />
 
-              <Stack.Screen name="embarquer" options={{ animation: 'slide_from_bottom' }} />
-              <Stack.Screen name="decouverte" options={{ animation: 'slide_from_bottom' }} />
-              <Stack.Screen name="comptoir" options={{ animation: 'slide_from_bottom' }} />
+              {/* A deeper level of the same place: pushed sideways, native back. */}
+              <Stack.Screen name="comptoir" />
 
               <Stack.Screen
                 name="jaugeage"
-                options={{ gestureEnabled: false, animation: 'slide_from_bottom' }}
+                options={{ gestureEnabled: false, animation: 'fade' }}
               />
               <Stack.Screen
                 name="onboarding"
-                options={{ gestureEnabled: false, animation: 'fade' }}
+                options={{ gestureEnabled: false, animation: 'none' }}
               />
             </Stack>
+            <ProbeOverlay />
           </View>
         </ThemeProvider>
       </SafeAreaProvider>

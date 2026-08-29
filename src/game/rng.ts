@@ -1,4 +1,3 @@
-
 export function createRng(seed: number): () => number {
   let a = seed >>> 0;
   return () => {

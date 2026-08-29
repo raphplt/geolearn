@@ -73,10 +73,7 @@ export function applyAnswer(
   correct: boolean,
 ): Calibration {
   const step = UP[Math.min(state.step, UP.length - 1)]!;
-  const ability = Math.min(
-    1,
-    Math.max(0, state.ability + (correct ? step : -step * DOWN_RATIO)),
-  );
+  const ability = Math.min(1, Math.max(0, state.ability + (correct ? step : -step * DOWN_RATIO)));
 
   return {
     ...state,

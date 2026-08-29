@@ -6,7 +6,6 @@
 > conserve la progression, dépendances mortes retirées. Reste le lot 3
 > (économie). Détail en fin de document.
 
-
 État des lieux et plan de route vers une v1 jouable. Rédigé après lecture
 complète du code existant, mesure des contrastes et vérification des points
 douteux.
@@ -22,19 +21,19 @@ peau, la coquille et la boucle de rétention.
 
 ### Ce qui existe
 
-| Couche | État |
-| --- | --- |
-| Atlas pré-projetés, 101 départements + 193 États | Complet, vérifié |
-| Moteur de partie (score, série, sablier, bilan) | Complet, simulé |
-| Répétition espacée (boîtes de Leitner) | Écrit, **jamais ordonnancé** |
-| Fabrique de questions et leurres pondérés | Complet, remarquable |
-| Rendu et pointé de la carte | Complet |
-| Jetons de design, typographie, thème nuit | Écrits, **mal calibrés en valeur** |
-| Écrans | 4 — accueil, jeu, bilan, atlas |
-| Gamification (monnaie, rangs, brevets, missions) | **Inexistante** |
-| Drapeaux | **Émojis** |
-| Réglages | Persistés, **sans aucune interface** |
-| Son | Dépendance et permissions déclarées, **zéro code** |
+| Couche                                           | État                                               |
+| ------------------------------------------------ | -------------------------------------------------- |
+| Atlas pré-projetés, 101 départements + 193 États | Complet, vérifié                                   |
+| Moteur de partie (score, série, sablier, bilan)  | Complet, simulé                                    |
+| Répétition espacée (boîtes de Leitner)           | Écrit, **jamais ordonnancé**                       |
+| Fabrique de questions et leurres pondérés        | Complet, remarquable                               |
+| Rendu et pointé de la carte                      | Complet                                            |
+| Jetons de design, typographie, thème nuit        | Écrits, **mal calibrés en valeur**                 |
+| Écrans                                           | 4 — accueil, jeu, bilan, atlas                     |
+| Gamification (monnaie, rangs, brevets, missions) | **Inexistante**                                    |
+| Drapeaux                                         | **Émojis**                                         |
+| Réglages                                         | Persistés, **sans aucune interface**               |
+| Son                                              | Dépendance et permissions déclarées, **zéro code** |
 
 ### Les cinq reproches, reformulés
 
@@ -44,7 +43,7 @@ esthétique.
 1. **Le thème n'a pas d'échelle de valeur.** Toutes les surfaces claires sont à
    la même luminance. Ce n'est pas une question de goût, c'est mesurable — voir
    le tableau ci-dessous. Les cartes ne se détachent pas du fond, les bordures
-   n'existent pas, et sur la carte la terre et la mer sont *strictement* de même
+   n'existent pas, et sur la carte la terre et la mer sont _strictement_ de même
    clarté.
 
 2. **La grammaire de mise en page est celle d'une page web, pas d'un jeu.**
@@ -74,18 +73,18 @@ esthétique.
 
 Calculés sur les jetons actuels de `src/theme/tokens.ts`.
 
-| Couple | Ratio | Attendu | Verdict |
-| --- | ---: | ---: | --- |
-| Terre inconnue / mer — thème clair | **1,01:1** | ≥ 2,2 | La carte n'existe pas |
-| Territoire acquis / inconnu — clair | **1,24:1** | ≥ 2,5 | La promesse « la carte se colore » est invisible |
-| Terre / mer — thème nuit | **1,19:1** | ≥ 2,2 | Idem |
-| Carte posée / fond — clair | **1,11:1** | ≥ 1,6 | Aucun relief |
-| Carte posée / fond — nuit | **1,21:1** | ≥ 1,6 | Aucun relief |
-| Bordure de carte / carte — clair | **1,53:1** | ≥ 3,0 | Bordure décorative, pas structurante |
-| Bordure de carte / carte — nuit | **1,20:1** | ≥ 3,0 | Idem |
-| `textTertiary` sur surface — clair | **2,85:1** | ≥ 4,5 | Échoue AA — et c'est la couleur des cartouches, des légendes et des libellés de statistiques |
-| `textTertiary` sur surface — nuit | **3,07:1** | ≥ 4,5 | Échoue AA |
-| Trait de côte / terre — clair | **2,23:1** | ≥ 3,0 | Frontières trop pâles |
+| Couple                              |      Ratio | Attendu | Verdict                                                                                      |
+| ----------------------------------- | ---------: | ------: | -------------------------------------------------------------------------------------------- |
+| Terre inconnue / mer — thème clair  | **1,01:1** |   ≥ 2,2 | La carte n'existe pas                                                                        |
+| Territoire acquis / inconnu — clair | **1,24:1** |   ≥ 2,5 | La promesse « la carte se colore » est invisible                                             |
+| Terre / mer — thème nuit            | **1,19:1** |   ≥ 2,2 | Idem                                                                                         |
+| Carte posée / fond — clair          | **1,11:1** |   ≥ 1,6 | Aucun relief                                                                                 |
+| Carte posée / fond — nuit           | **1,21:1** |   ≥ 1,6 | Aucun relief                                                                                 |
+| Bordure de carte / carte — clair    | **1,53:1** |   ≥ 3,0 | Bordure décorative, pas structurante                                                         |
+| Bordure de carte / carte — nuit     | **1,20:1** |   ≥ 3,0 | Idem                                                                                         |
+| `textTertiary` sur surface — clair  | **2,85:1** |   ≥ 4,5 | Échoue AA — et c'est la couleur des cartouches, des légendes et des libellés de statistiques |
+| `textTertiary` sur surface — nuit   | **3,07:1** |   ≥ 4,5 | Échoue AA                                                                                    |
+| Trait de côte / terre — clair       | **2,23:1** |   ≥ 3,0 | Frontières trop pâles                                                                        |
 
 Sont corrects et resteront tels quels : le texte principal (16,1:1), le texte
 secondaire (5,4:1), les aplats de bonne et de mauvaise réponse.
@@ -103,9 +102,9 @@ Faits vérifiés dans le code, indépendants des remarques ci-dessus.
 - **Quitter une partie perd la progression.** `app/play.tsx` fait
   `router.replace('/')` sans appeler `recordSession` : les cartes révisées
   pendant la session sont jetées.
-- **Deux comptes de maîtrise divergents.** L'accueil compte des *cartes*
+- **Deux comptes de maîtrise divergents.** L'accueil compte des _cartes_
   (`level >= 3`, toutes compétences confondues) et l'affiche « sur N vus » ;
-  l'écran Atlas compte des *territoires* au minimum de leurs cartes. Les deux
+  l'écran Atlas compte des _territoires_ au minimum de leurs cartes. Les deux
   écrans annoncent des chiffres différents pour la même idée.
 - **La question est plus petite que le sujet.** `Prompt` rend la consigne en
   `cartouche` — 12 px, capitales espacées. Pour les compétences `name` et
@@ -132,7 +131,7 @@ Trois règles pour que les lots qui suivent restent cohérents entre eux.
 
 **On ne change pas la direction artistique, on lui donne du relief.** Les
 teintes restent : parchemin, encre sépia, vermillon, vert-de-gris, laiton, mer.
-Ce qui change est l'échelle de *valeur* — l'écart de luminance entre les
+Ce qui change est l'échelle de _valeur_ — l'écart de luminance entre les
 surfaces. Une carte portulan authentique est très contrastée : encre noire sur
 vélin, traits de côte appuyés, mers franchement teintées. Le thème actuel a la
 palette d'un portulan et la valeur d'un lavis délavé.
@@ -155,8 +154,8 @@ drapeaux, `economy:verify` simule la courbe de progression.
 
 #### Lot 0 · Recalibrage du thème
 
-*Intention : que les surfaces se distinguent, que la carte se lise, que la
-progression se voie.*
+_Intention : que les surfaces se distinguent, que la carte se lise, que la
+progression se voie._
 
 - Réécrire l'échelle `parchment` et `night` en **échelle de valeur** : quatre
   paliers de surface séparés d'au moins 1,25:1 chacun, du fond creusé à la
@@ -167,7 +166,7 @@ progression se voie.*
   distinct pour le décoratif réellement non porteur d'information, seul autorisé
   à descendre.
 - **Carte** : mer franchement teintée, terre inconnue plus sourde, territoire
-  acquis en vert-de-gris ou laiton *saturé* et non en parchemin clair, trait de
+  acquis en vert-de-gris ou laiton _saturé_ et non en parchemin clair, trait de
   côte en encre appuyée, frontières internes en encre diluée. Le halo côtier
   gagne un troisième anneau.
 - Ombres : les élévations actuelles sont trop diffuses pour se voir sur
@@ -177,12 +176,12 @@ progression se voie.*
   (avant-plan, arrière-plan, seuil), calcul du ratio, sortie en échec sous
   seuil. Branché dans `pnpm verify`.
 
-*Fait quand :* `pnpm theme:verify` passe sur les deux thèmes, et une capture de
+_Fait quand :_ `pnpm theme:verify` passe sur les deux thèmes, et une capture de
 l'atlas France montre les départements acquis sans qu'on ait à chercher.
 
 #### Lot 1 · Vrais drapeaux
 
-*Intention : qu'une question sur un drapeau montre un drapeau.*
+_Intention : qu'une question sur un drapeau montre un drapeau._
 
 - `scripts/build-flags.mts` : télécharge les 193 drapeaux des membres de l'ONU
   en PNG (source `flagcdn`, dérivée de `lipis/flag-icons`, MIT), via le cache de
@@ -203,13 +202,13 @@ l'atlas France montre les départements acquis sans qu'on ait à chercher.
   cohérents. Attribution ajoutée aux crédits, à la manière des sources
   géographiques déjà consignées.
 
-*Fait quand :* les 193 drapeaux s'affichent hors ligne, sur appareil et sur web,
+_Fait quand :_ les 193 drapeaux s'affichent hors ligne, sur appareil et sur web,
 identiques d'une plateforme à l'autre.
 
 #### Lot 2 · Coquille de jeu
 
-*Intention : que l'application cesse d'être une pile d'écrans et devienne un
-lieu.*
+_Intention : que l'application cesse d'être une pile d'écrans et devienne un
+lieu._
 
 - **Onglets** — passage à `app/(tabs)/` : **Cap** (jouer), **Atlas**,
   **Brevets**, **Cabine**. Barre d'onglets dessinée à la main, en papier et
@@ -228,7 +227,7 @@ lieu.*
 - Pile hors onglets : `play`, `results`, `territory/[id]`, `shop`, `onboarding`.
   Animations de transition choisies par route, et non `fade` pour tout.
 
-*Fait quand :* on peut atteindre chaque fonction en deux touchers depuis
+_Fait quand :_ on peut atteindre chaque fonction en deux touchers depuis
 n'importe où, et l'accueil ne ressemble plus à une page vitrine.
 
 ---
@@ -237,7 +236,7 @@ n'importe où, et l'accueil ne ressemble plus à une page vitrine.
 
 #### Lot 3 · Économie et progression
 
-*Intention : que quelque chose s'accumule.*
+_Intention : que quelque chose s'accumule._
 
 Nouveau module `src/game/economy.ts`, pur et testable comme le reste du moteur.
 
@@ -274,7 +273,7 @@ Nouveau module `src/game/economy.ts`, pur et testable comme le reste du moteur.
 
 #### Lot 4 · Le jeu lui-même
 
-*Intention : que jouer soit lisible et jouable.*
+_Intention : que jouer soit lisible et jouable._
 
 - **Mode Révision.** Enfin brancher `reviewPriority` : file construite des
   cartes échues, la plus en retard en tête, sans chronomètre. C'est la troisième
@@ -372,18 +371,18 @@ décoratif, un `bevel` pour le liseré d'arête, et des rôles de carte séparé
 du parchemin, elles ne se voyaient pas.
 
 `scripts/verify-theme.mts` + `pnpm theme:verify` — 164 contrôles, seuil par
-usage, branché dans `pnpm verify`. Il a servi à *choisir* les valeurs, pas
+usage, branché dans `pnpm verify`. Il a servi à _choisir_ les valeurs, pas
 seulement à les contrôler après coup.
 
-| Couple | Avant | Après | Seuil |
-| --- | ---: | ---: | ---: |
-| Terre / mer — clair | 1,01:1 | 1,86:1 | 1,8 |
-| Terre / mer — nuit | 1,19:1 | 1,86:1 | 1,8 |
-| Acquis / inconnu — clair | 1,24:1 | 2,87:1 | 2,4 |
-| Feuille / fond — clair | 1,11:1 | 1,27:1 | 1,22 |
-| Bordure de feuille — clair | 1,53:1 | 2,87:1 | 2,2 |
-| Contour tactile — clair | — | 5,76:1 | 3,0 |
-| `textTertiary` sur fond | 2,85:1 | 4,52:1 | 4,5 |
+| Couple                     |  Avant |  Après | Seuil |
+| -------------------------- | -----: | -----: | ----: |
+| Terre / mer — clair        | 1,01:1 | 1,86:1 |   1,8 |
+| Terre / mer — nuit         | 1,19:1 | 1,86:1 |   1,8 |
+| Acquis / inconnu — clair   | 1,24:1 | 2,87:1 |   2,4 |
+| Feuille / fond — clair     | 1,11:1 | 1,27:1 |  1,22 |
+| Bordure de feuille — clair | 1,53:1 | 2,87:1 |   2,2 |
+| Contour tactile — clair    |      — | 5,76:1 |   3,0 |
+| `textTertiary` sur fond    | 2,85:1 | 4,52:1 |   4,5 |
 
 `PaperSurface` gagne le biseau et les trois tons de bordure ; c'est lui, et non
 la couleur de fond, qui fait ressortir une carte du parchemin.
@@ -418,12 +417,12 @@ sur un couloir.
 aucune — les doublons et le rang s'y glisseront sans le toucher.
 
 **Accueil refondu** : fin des trois cartes égales. Sélecteur de terrain en tête
-(il conditionne tous les chiffres qui suivent et se trouvait auparavant *entre*
+(il conditionne tous les chiffres qui suivent et se trouvait auparavant _entre_
 eux), vedette Expédition avec la silhouette du terrain en filigrane et un seul
 bouton, puis deux entrées nettement plus basses en poids.
 
 **Cabine** — l'écran de réglages qui n'existait pas : thème, retour haptique,
-relevés cumulés, effacement en deux temps qui *nomme* ce qui sera perdu, et la
+relevés cumulés, effacement en deux temps qui _nomme_ ce qui sera perdu, et la
 provenance des données. Interrupteur dessiné plutôt que le `Switch` natif, dont
 le vert iOS et le violet Material sont la première chose que l'œil trouve sur du
 parchemin.
@@ -482,7 +481,6 @@ entre dans la carte.
   greffon `expo-audio` les réinjecte.
 - `expo-linear-gradient` reste inutilisé.
 
-
 ---
 
 ## Journal — accompagnement et accueil
@@ -497,7 +495,7 @@ Le diagnostic exact : `randomQuestion` tirait **uniformément** sur les 101
 départements, uniformément sur les 165 pays, uniformément sur les cinq
 compétences. Un joueur qui n'a jamais révisé se voyait donc demander la Creuse à
 sa première partie, avec exactement la même probabilité que le Nord. Et il n'y
-avait aucun moment, nulle part, où l'on *montrait* un territoire avant de
+avait aucun moment, nulle part, où l'on _montrait_ un territoire avant de
 l'interroger : la répétition espacée entretient une trace, elle ne la crée pas.
 
 Quatre pièces neuves.
@@ -596,7 +594,7 @@ au lieu de composer. La rose est retirée de la vedette — elle reste seule sur
 l'appareillage et la première ouverture, où elle est la marque.
 
 **La légende de l'Atlas en ovales de six cents points.** Un `ScrollView`
-horizontal placé dans une colonne s'étire sur *tout* l'espace vertical restant
+horizontal placé dans une colonne s'étire sur _tout_ l'espace vertical restant
 s'il n'a pas `flexGrow: 0`. Les pastilles, de rayon « pilule », devenaient des
 capsules géantes. C'est le piège classique du défilement horizontal en flexbox
 React Native, et il ne se voit qu'à l'écran.
@@ -604,12 +602,12 @@ React Native, et il ne se voit qu'à l'écran.
 **Les étiquettes de la carte, illisibles et superposées.** Deux fautes
 distinctes :
 
-- *Le corps du texte était exprimé en unités atlas.* 26 unités sur une carte
+- _Le corps du texte était exprimé en unités atlas._ 26 unités sur une carte
   large de 4 000 rendue dans 360 points font **0,14 point** — un cheveu. Toutes
   les mesures de tracé — traits de côte, frontières, halo, graticule, étiquettes
   — passent maintenant par les points d'écran, ce qui rend l'épaisseur apparente
   constante par construction et lisible d'emblée.
-- *Le tri se faisait sur l'aire.* Les départements français vont de 0,4 % à
+- _Le tri se faisait sur l'aire._ Les départements français vont de 0,4 % à
   1,1 % du cadre : une plage trop resserrée pour trier quoi que ce soit, si bien
   qu'ils s'affichaient tous d'un coup. La règle est désormais celle du lettrage
   cartographique — **un nom s'affiche s'il tient dans la largeur que son
@@ -640,7 +638,7 @@ soin après chaque partie et **personne ne les lisait**. `src/game/revision.ts`
 construit la file des cartes échues, la plus en retard d'abord ; `lessonConfig`
 en fait une séance qui repose exactement ces cartes-là, dans cet ordre, sans
 chronomètre. Neuf contrôles neufs dans `game:verify`, dont celui qui compte :
-*chaque question porte la carte attendue, dans l'ordre d'urgence*.
+_chaque question porte la carte attendue, dans l'ordre d'urgence_.
 
 La file ne renvoie que les cartes **réellement échues** — pas les cartes jamais
 vues, qui sont l'objet de la Découverte, ni les cartes à jour, dont la révision
@@ -654,7 +652,7 @@ répétition espacée doit faire. La progression est enregistrée, le score non 
 une partie abandonnée n'est pas un record.
 
 **193 États et non 165.** Natural Earth au 1/110 000 000 ne dessine pas les
-micro-États, et le vivier les écartait *entièrement* — y compris des questions de
+micro-États, et le vivier les écartait _entièrement_ — y compris des questions de
 drapeau et de capitale, qui n'ont besoin d'aucune géométrie. `SKILL_NEEDS_SHAPE`
 distingue les compétences qui exigent un tracé de celles qui n'en exigent pas.
 Malte et Singapour sont interrogeables sur leur drapeau ; ils restent hors des
@@ -674,7 +672,6 @@ avec du code, pas avant.
   manquante.
 - Retirer `expo-audio` touche au natif : il faut un `pnpm install` et un
   nouveau build de développement pour que le changement prenne.
-
 
 ### La première ouverture, refaite
 
@@ -709,7 +706,7 @@ l'usage — retardait leur premier rendu pour rien.
 
 **On paie ce qui est appris, pas ce qui est joué.** C'est la seule décision
 structurante, et elle se lit dans tous les barèmes : l'expérience ne vient
-*exclusivement* que des promotions de cartes, des acquisitions et des cartouches
+_exclusivement_ que des promotions de cartes, des acquisitions et des cartouches
 scellés. Un joueur qui enchaîne les expéditions sans rien retenir gagne quelques
 doublons et **aucun rang**.
 
@@ -731,7 +728,7 @@ de bord tout objectif de durée.
   différents.
 - **`brevets.ts`** — treize titres, chacun **fonction pure de la progression** et
   jamais un compteur. Un compteur se désynchronise à la première migration ; une
-  fonction de l'état ne le peut pas. Seule la *date* d'obtention est persistée.
+  fonction de l'état ne le peut pas. Seule la _date_ d'obtention est persistée.
 - **`mastery.ts`** — les cartouches. Une région entièrement sue se scelle et se
   colore d'or sur l'atlas. Les groupes d'un seul territoire sont écartés :
   sceller « Mayotte » parce qu'on connaît Mayotte dévaluerait les vrais sceaux.
@@ -746,8 +743,8 @@ de bord tout objectif de durée.
 espacée, puis regarde ce que la bourse permet. Le premier réglage donnait
 **5,8 encres et 87 indices** en vingt parties : la boutique était vide avant
 d'avoir servi, et la monnaie sans horizon. Prix et gains revus, la
-spécification est désormais énoncée et vérifiée — *après une vingtaine de
-parties, on s'offre la première encre et pas la seconde.*
+spécification est désormais énoncée et vérifiée — _après une vingtaine de
+parties, on s'offre la première encre et pas la seconde._
 
 Le contrôle a aussi confirmé que l'amirauté tombe à 67 % d'un atlas entièrement
 su : ni un titre décoratif atteint en trois jours, ni un mur.
@@ -758,7 +755,7 @@ Le premier réglage était trois. La simulation a montré qu'il **raccourcissait
 les parties de moitié** et transformait la fin en coup de dé sur les premières
 erreurs, ce qui défaisait toute la calibration documentée de l'expédition.
 
-À six, les longueurs moyennes sont *identiques* à celles sans avaries — 12, 19,
+À six, les longueurs moyennes sont _identiques_ à celles sans avaries — 12, 19,
 32, 99, 125 questions selon la précision — et seule la raison de la fin change.
 Les avaries ne durcissent rien : elles donnent un nom et un décompte visible à
 une fin que le sablier provoquait déjà en silence. `game:verify` en fait un
@@ -795,7 +792,6 @@ compositeur, au lieu d'être redessiné à chaque image.
 Le lot 3 clôt la feuille de route. Ce qui reste relève des lots P2/P3 : fiche
 territoire, son, réduction de mouvement, et l'accessibilité non visuelle de la
 carte.
-
 
 ### Correctif — la boucle de rendu au montage
 

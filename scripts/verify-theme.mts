@@ -40,13 +40,23 @@ const rules: Rule[] = [
   { fg: 'textSecondary', bg: 'surfaceRaised', min: 4.5, why: 'texte secondaire sur une feuille' },
   { fg: 'textTertiary', bg: 'canvas', min: 4.5, why: 'cartouches et légendes sur le fond' },
   { fg: 'textTertiary', bg: 'surface', min: 4.5, why: 'cartouches et légendes sur une surface' },
-  { fg: 'textTertiary', bg: 'surfaceRaised', min: 4.5, why: 'cartouches et légendes sur une feuille' },
+  {
+    fg: 'textTertiary',
+    bg: 'surfaceRaised',
+    min: 4.5,
+    why: 'cartouches et légendes sur une feuille',
+  },
   { fg: 'textQuiet', bg: 'canvas', min: 1.9, why: 'filigrane — décoratif, mais visible' },
   { fg: 'textInverse', bg: 'text', min: 7, why: 'libellé d’un bouton primaire' },
 
   { fg: 'surfaceRaised', bg: 'canvas', min: 1.22, why: 'une feuille posée se détache du fond' },
   { fg: 'surfaceSunk', bg: 'canvas', min: 1.12, why: 'une surface creusée s’enfonce dans le fond' },
-  { fg: 'surfaceRaised', bg: 'surfaceSunk', min: 1.45, why: 'jauge : le remplissage contre sa gorge' },
+  {
+    fg: 'surfaceRaised',
+    bg: 'surfaceSunk',
+    min: 1.45,
+    why: 'jauge : le remplissage contre sa gorge',
+  },
 
   {
     fg: 'borderStrong',
@@ -54,9 +64,24 @@ const rules: Rule[] = [
     min: { light: 3, dark: 2.4 },
     why: 'contour d’un composant tactile (WCAG 1.4.11)',
   },
-  { fg: 'borderStrong', bg: 'canvas', min: { light: 3, dark: 2.6 }, why: 'contour tactile sur le fond' },
-  { fg: 'border', bg: 'surfaceRaised', min: { light: 2.2, dark: 1.4 }, why: 'bord d’une feuille posée' },
-  { fg: 'border', bg: 'canvas', min: { light: 2.2, dark: 1.5 }, why: 'bord d’une feuille sur le fond' },
+  {
+    fg: 'borderStrong',
+    bg: 'canvas',
+    min: { light: 3, dark: 2.6 },
+    why: 'contour tactile sur le fond',
+  },
+  {
+    fg: 'border',
+    bg: 'surfaceRaised',
+    min: { light: 2.2, dark: 1.4 },
+    why: 'bord d’une feuille posée',
+  },
+  {
+    fg: 'border',
+    bg: 'canvas',
+    min: { light: 2.2, dark: 1.5 },
+    why: 'bord d’une feuille sur le fond',
+  },
   { fg: 'borderSoft', bg: 'surfaceRaised', min: 1.2, why: 'filet décoratif' },
 
   { fg: 'danger', bg: 'canvas', min: 3, why: 'jauge de temps sur le fond' },
@@ -85,7 +110,12 @@ const rules: Rule[] = [
   { fg: 'mapStrokeStrong', bg: 'mapLandIdle', min: 3, why: 'trait de côte côté terre' },
   { fg: 'mapStrokeStrong', bg: 'mapWater', min: 3, why: 'trait de côte côté mer' },
   { fg: 'mapStroke', bg: 'mapLandIdle', min: 2, why: 'frontières intérieures' },
-  { fg: 'mapLand', bg: 'mapLandIdle', min: 2.4, why: 'territoire acquis contre territoire inconnu' },
+  {
+    fg: 'mapLand',
+    bg: 'mapLandIdle',
+    min: 2.4,
+    why: 'territoire acquis contre territoire inconnu',
+  },
   { fg: 'mapTarget', bg: 'mapLandIdle', min: 1.5, why: 'territoire en jeu contre les autres' },
   { fg: 'mapTarget', bg: 'mapLand', min: 1.6, why: 'territoire en cours contre territoire acquis' },
   { fg: 'mapCorrect', bg: 'mapLandIdle', min: 1.9, why: 'bonne réponse sur la carte' },
@@ -93,8 +123,18 @@ const rules: Rule[] = [
   { fg: 'mapWrong', bg: 'mapTarget', min: 1.35, why: 'ce qu’on a désigné contre la bonne réponse' },
   { fg: 'mapLabel', bg: 'mapLabelHalo', min: 7, why: 'étiquette contre son halo' },
   { fg: 'mapLabelHalo', bg: 'mapLand', min: 1.9, why: 'halo d’étiquette sur un territoire acquis' },
-  { fg: 'mapLabelHalo', bg: 'mapLandIdle', min: 1.1, why: 'halo d’étiquette sur un territoire au repos' },
-  { fg: 'mapGraticule', bg: 'mapWater', min: 1.12, why: 'graticule sur la mer — se devine, ne se lit pas' },
+  {
+    fg: 'mapLabelHalo',
+    bg: 'mapLandIdle',
+    min: 1.1,
+    why: 'halo d’étiquette sur un territoire au repos',
+  },
+  {
+    fg: 'mapGraticule',
+    bg: 'mapWater',
+    min: 1.12,
+    why: 'graticule sur la mer — se devine, ne se lit pas',
+  },
 ];
 
 let checks = 0;
@@ -145,7 +185,10 @@ for (const ink of INKS) {
   }
 }
 
-for (const [id, schemes] of Object.entries(INK_PALETTES) as [InkId, Record<ColorScheme, Record<string, string>>][]) {
+for (const [id, schemes] of Object.entries(INK_PALETTES) as [
+  InkId,
+  Record<ColorScheme, Record<string, string>>,
+][]) {
   for (const scheme of ['light', 'dark'] as ColorScheme[]) {
     for (const role of Object.keys(schemes[scheme])) {
       checks++;

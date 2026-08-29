@@ -28,7 +28,12 @@ export function IconCap({ size, color, active }: IconProps) {
         strokeLinejoin="round"
         fill={active ? color : 'none'}
       />
-      <Path d="M4.5 12 L12 10 L19.5 12 L12 14 Z" stroke={color} strokeWidth={w} strokeLinejoin="round" />
+      <Path
+        d="M4.5 12 L12 10 L19.5 12 L12 14 Z"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinejoin="round"
+      />
     </Frame>
   );
 }
@@ -40,8 +45,18 @@ export function IconAtlas({ size, color, active }: IconProps) {
       <Circle cx={12} cy={12} r={9} stroke={color} strokeWidth={w} />
       <Line x1={3} y1={12} x2={21} y2={12} stroke={color} strokeWidth={w} strokeLinecap="round" />
       <Ellipse cx={12} cy={12} rx={4.2} ry={9} stroke={color} strokeWidth={w} />
-      <Path d="M5 7.2 C8 8.8, 16 8.8, 19 7.2" stroke={color} strokeWidth={w} strokeLinecap="round" />
-      <Path d="M5 16.8 C8 15.2, 16 15.2, 19 16.8" stroke={color} strokeWidth={w} strokeLinecap="round" />
+      <Path
+        d="M5 7.2 C8 8.8, 16 8.8, 19 7.2"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinecap="round"
+      />
+      <Path
+        d="M5 16.8 C8 15.2, 16 15.2, 19 16.8"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinecap="round"
+      />
     </Frame>
   );
 }
@@ -119,8 +134,19 @@ export function IconSeal({ size, color, active }: IconProps) {
   return (
     <Frame size={size}>
       <Circle cx={12} cy={10} r={6.2} stroke={color} strokeWidth={w} />
-      <Path d="M9.4 10.2 L11.2 12 L14.8 8.2" stroke={color} strokeWidth={w} strokeLinecap="round" strokeLinejoin="round" />
-      <Path d="M8.6 15.4 L7.4 21 L12 19 L16.6 21 L15.4 15.4" stroke={color} strokeWidth={w} strokeLinejoin="round" />
+      <Path
+        d="M9.4 10.2 L11.2 12 L14.8 8.2"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path
+        d="M8.6 15.4 L7.4 21 L12 19 L16.6 21 L15.4 15.4"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinejoin="round"
+      />
     </Frame>
   );
 }
@@ -146,8 +172,22 @@ export function IconBrevet({ size, color, active }: IconProps) {
   const w = active ? 2 : 1.5;
   return (
     <Frame size={size}>
-      <Circle cx={12} cy={9} r={5.4} stroke={color} strokeWidth={w} fill={active ? color : 'none'} />
-      <Circle cx={12} cy={9} r={2.1} stroke={color} strokeWidth={w * 0.7} opacity={active ? 0.35 : 1} />
+      <Circle
+        cx={12}
+        cy={9}
+        r={5.4}
+        stroke={color}
+        strokeWidth={w}
+        fill={active ? color : 'none'}
+      />
+      <Circle
+        cx={12}
+        cy={9}
+        r={2.1}
+        stroke={color}
+        strokeWidth={w * 0.7}
+        opacity={active ? 0.35 : 1}
+      />
       <Path
         d="M8.4 13.6 L6.6 21 L12 18.6 L17.4 21 L15.6 13.6"
         stroke={color}
@@ -175,6 +215,75 @@ export function IconHull({ size, color, active }: IconProps) {
         strokeWidth={1.6}
         strokeLinejoin="round"
         fill="none"
+      />
+    </Frame>
+  );
+}
+
+export function IconBack({ size, color }: IconProps) {
+  return (
+    <Frame size={size}>
+      <Path
+        d="M14.5 5 L7.5 12 L14.5 19"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Frame>
+  );
+}
+
+export function IconChevron({ size, color }: IconProps) {
+  return (
+    <Frame size={size}>
+      <Path
+        d="M9.5 5 L16.5 12 L9.5 19"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill="none"
+      />
+    </Frame>
+  );
+}
+
+export function IconClose({ size, color }: IconProps) {
+  return (
+    <Frame size={size}>
+      <Path
+        d="M6 6 L18 18 M18 6 L6 18"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        fill="none"
+      />
+    </Frame>
+  );
+}
+
+export function IconSearch({ size, color }: IconProps) {
+  return (
+    <Frame size={size}>
+      <Circle cx={10.5} cy={10.5} r={6} stroke={color} strokeWidth={1.8} fill="none" />
+      <Path d="M15 15 L20 20" stroke={color} strokeWidth={2} strokeLinecap="round" fill="none" />
+    </Frame>
+  );
+}
+
+export function IconCompass({ size, color, active }: IconProps) {
+  const w = active ? 2 : 1.6;
+  return (
+    <Frame size={size}>
+      <Circle cx={12} cy={12} r={8.5} stroke={color} strokeWidth={w} fill="none" />
+      <Path
+        d="M15.5 8.5 L10.8 10.8 L8.5 15.5 L13.2 13.2 Z"
+        stroke={color}
+        strokeWidth={w}
+        strokeLinejoin="round"
+        fill={active ? color : 'none'}
       />
     </Frame>
   );

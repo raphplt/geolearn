@@ -1,9 +1,5 @@
 import { Pressable, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useDerivedValue,
-  withSpring,
-} from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useDerivedValue, withSpring } from 'react-native-reanimated';
 
 import { tap } from '@/fx/haptics';
 import { useTheme } from '@/theme';
@@ -25,9 +21,7 @@ export function Toggle({
   const KNOB = 24;
   const PAD = 3;
 
-  const progress = useDerivedValue(() =>
-    withSpring(value ? 1 : 0, theme.motion.spring.snappy),
-  );
+  const progress = useDerivedValue(() => withSpring(value ? 1 : 0, theme.motion.spring.snappy));
 
   const knobStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: progress.value * (TRACK - KNOB - PAD * 2) }],

@@ -23,9 +23,15 @@ export type DailyResult = {
 export type Settings = {
   scheme: SchemePreference;
   haptics: boolean;
+  /** The atlas currently on screen. */
   lastAtlas: AtlasId;
-  floor: number;
+  /** The atlases actually being learnt. Never empty. */
+  studying: AtlasId[];
+  /** A player can be a beginner on the world and fluent on France. */
+  floors: Record<AtlasId, number>;
   onboarded: boolean;
+  /** Development only: the fluidity probe of the performance audit. */
+  probe: boolean;
 };
 
 export type Records = {
@@ -83,8 +89,10 @@ type ProgressState = {
   ) => SessionReport | null;
   completeDaily: (result: DailyResult, now?: number) => void;
   updateSettings: (patch: Partial<Settings>) => void;
+  setFloor: (atlasId: AtlasId, floor: number) => void;
+  setStudying: (atlases: readonly AtlasId[]) => void;
   buyHint: (id: HintId, price: number) => boolean;
-  useHint: (id: HintId) => boolean;
+  spendHint: (id: HintId) => boolean;
   buyInk: (id: InkId, price: number) => boolean;
   selectInk: (id: InkId) => void;
   resetProgress: () => void;
@@ -103,12 +111,19 @@ const emptyPurse = (): Purse => ({ doublons: 0, xp: 0, hints: {}, inks: ['sepia'
 
 const emptyCarnet = (): Carnet => ({ dateKey: dailyKey(), progress: {}, paid: 0 });
 
+const emptyFloors = (): Record<AtlasId, number> => ({
+  'france-departments': 0,
+  'world-countries': 0,
+});
+
 const defaultSettings = (): Settings => ({
   scheme: 'system',
   haptics: true,
   lastAtlas: 'france-departments',
-  floor: 0,
+  studying: ['france-departments'],
+  floors: emptyFloors(),
   onboarded: false,
+  probe: false,
 });
 
 export const recordKey = (atlasId: AtlasId, mode: SessionMode): string => `${atlasId}:${mode}`;
@@ -123,7 +138,7 @@ function previousDayKey(key: string): string {
 function masteredTotal(cards: Record<CardId, Card>): number {
   let total = 0;
   for (const atlasId of Object.keys(ATLASES) as AtlasId[]) {
-    total += masteryOf(cards, atlasId, ATLASES[atlasId]).mastered;
+    total += masteryOf(cards, atlasId).mastered;
   }
   return total;
 }
@@ -151,14 +166,23 @@ export const useProgress = create<ProgressState>()(
         const state = get();
         if (summary.asked === 0) return null;
 
+        /*
+         * The daily survey is the same ten questions for everyone, drawn from
+         * the whole atlas. Feeding it to the spaced repetition schedule would
+         * demote cards a player never chose to study, so it is kept out of it.
+         */
+        const schedules = session.config.mode !== 'daily';
+
         const cards = { ...state.cards };
         let promotions = 0;
 
-        for (const answer of session.answers) {
-          const before = cards[answer.cardId] ?? createCard(answer.cardId, now);
-          const after = review(before, { correct: answer.correct, elapsed: answer.elapsed }, now);
-          if (after.level > before.level) promotions++;
-          cards[answer.cardId] = after;
+        if (schedules) {
+          for (const answer of session.answers) {
+            const before = cards[answer.cardId] ?? createCard(answer.cardId, now);
+            const after = review(before, { correct: answer.correct, elapsed: answer.elapsed }, now);
+            if (after.level > before.level) promotions++;
+            cards[answer.cardId] = after;
+          }
         }
 
         const masteredBefore = masteredTotal(state.cards);
@@ -188,8 +212,7 @@ export const useProgress = create<ProgressState>()(
           cards,
           xp: xpAfter,
           longestStreak: state.daily.longestStreak,
-          bestExpedition: state.records.best[recordKey(session.config.atlasId, 'expedition')] ?? 0,
-          floor: state.settings.floor,
+          floor: Math.max(...Object.values(state.settings.floors)),
           bestCombo,
         };
         const brevets = newBrevets(context, state.brevets);
@@ -215,8 +238,7 @@ export const useProgress = create<ProgressState>()(
           },
           purse: {
             ...state.purse,
-            doublons:
-              state.purse.doublons + earnings.doublons + payout.doublons + brevets.doublons,
+            doublons: state.purse.doublons + earnings.doublons + payout.doublons + brevets.doublons,
             xp: xpAfter,
           },
           carnet: { dateKey: today, progress: carnetProgress, paid: payout.completed },
@@ -249,8 +271,27 @@ export const useProgress = create<ProgressState>()(
           };
         }),
 
-      updateSettings: (patch) =>
-        set((state) => ({ settings: { ...state.settings, ...patch } })),
+      updateSettings: (patch) => set((state) => ({ settings: { ...state.settings, ...patch } })),
+
+      setStudying: (atlases) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            /* Studying nothing is not a state the application can be in. */
+            studying: atlases.length > 0 ? [...atlases] : [state.settings.lastAtlas],
+            lastAtlas: atlases.includes(state.settings.lastAtlas)
+              ? state.settings.lastAtlas
+              : (atlases[0] ?? state.settings.lastAtlas),
+          },
+        })),
+
+      setFloor: (atlasId, floor) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            floors: { ...state.settings.floors, [atlasId]: Math.max(0, floor) },
+          },
+        })),
 
       buyHint: (id, price) => {
         const { purse } = get();
@@ -265,7 +306,7 @@ export const useProgress = create<ProgressState>()(
         return true;
       },
 
-      useHint: (id) => {
+      spendHint: (id) => {
         const { purse } = get();
         const held = purse.hints[id] ?? 0;
         if (held <= 0) return false;
@@ -276,7 +317,9 @@ export const useProgress = create<ProgressState>()(
       buyInk: (id, price) => {
         const { purse } = get();
         if (purse.inks.includes(id) || purse.doublons < price) return false;
-        set({ purse: { ...purse, doublons: purse.doublons - price, inks: [...purse.inks, id], ink: id } });
+        set({
+          purse: { ...purse, doublons: purse.doublons - price, inks: [...purse.inks, id], ink: id },
+        });
         return true;
       },
 
@@ -286,7 +329,8 @@ export const useProgress = create<ProgressState>()(
         ),
 
       resetProgress: () =>
-        set({
+        set((state) => ({
+          settings: { ...state.settings, floors: emptyFloors() },
           cards: {},
           records: emptyRecords(),
           purse: emptyPurse(),
@@ -294,11 +338,11 @@ export const useProgress = create<ProgressState>()(
           brevets: {},
           seals: [],
           daily: { results: {}, currentStreak: 0, longestStreak: 0, lastCompleted: null },
-        }),
+        })),
     }),
     {
       name: 'portulan.progress',
-      version: 5,
+      version: 7,
       storage: createJSONStorage(() => AsyncStorage),
       partialize: ({ hydrated: _hydrated, ...rest }) => rest,
       migrate: (persisted, version) => {
@@ -315,13 +359,38 @@ export const useProgress = create<ProgressState>()(
           } as ProgressState;
         }
 
-        if (version < 5) {
-          const legacy = (next.settings as unknown as { level?: string })?.level;
-          const floor = legacy === 'confirme' ? 4 : legacy === 'notions' ? 2 : 0;
-          const { level: _level, ...settings } = (next.settings ?? {}) as Settings & {
-            level?: string;
-          };
-          next = { ...next, settings: { ...defaultSettings(), ...settings, floor } } as ProgressState;
+        if (version < 6) {
+          const legacyLevel = (next.settings as unknown as { level?: string })?.level;
+          const legacyFloor = (next.settings as unknown as { floor?: number })?.floor;
+          const floor =
+            legacyFloor ?? (legacyLevel === 'confirme' ? 4 : legacyLevel === 'notions' ? 2 : 0);
+
+          const {
+            level: _level,
+            floor: _floor,
+            ...settings
+          } = (next.settings ?? {}) as Settings & { level?: string; floor?: number };
+
+          next = {
+            ...next,
+            settings: {
+              ...defaultSettings(),
+              ...settings,
+              floors: { 'france-departments': floor, 'world-countries': floor },
+            },
+          } as ProgressState;
+        }
+
+        if (version < 7) {
+          const settings = (next.settings ?? {}) as Settings;
+          const studying =
+            settings.studying?.length > 0
+              ? settings.studying
+              : [settings.lastAtlas ?? 'france-departments'];
+          next = {
+            ...next,
+            settings: { ...defaultSettings(), ...settings, studying },
+          } as ProgressState;
         }
 
         if (version < 4) {
@@ -330,8 +399,7 @@ export const useProgress = create<ProgressState>()(
             cards,
             xp: 0,
             longestStreak: next.daily?.longestStreak ?? 0,
-            bestExpedition: 0,
-            floor: next.settings?.floor ?? 0,
+            floor: 0,
             bestCombo: 0,
           };
           const already: Record<string, number> = {};
@@ -359,6 +427,24 @@ if (useProgress.persist.hasHydrated()) useProgress.setState({ hydrated: true });
 
 export const selectDailyDone = (state: ProgressState, key = dailyKey()): boolean =>
   Boolean(state.daily.results[key]);
+
+export const selectFloor = (state: ProgressState, atlasId: AtlasId): number =>
+  state.settings.floors?.[atlasId] ?? 0;
+
+/**
+ * The studied atlases, the one on screen first.
+ *
+ * Deliberately not a store selector: it builds a new array, and a selector
+ * passed to the store is read through `useSyncExternalStore`, which compares
+ * snapshots by identity and loops for ever on a fresh one. Anything derived
+ * that is not a primitive belongs in a `useMemo` on the caller's side.
+ */
+export const studiedAtlases = (settings: Settings): AtlasId[] => {
+  const studying = settings.studying?.length ? settings.studying : [settings.lastAtlas];
+  return [...studying].sort(
+    (a, b) => Number(b === settings.lastAtlas) - Number(a === settings.lastAtlas),
+  );
+};
 
 export const selectAccuracy = (state: ProgressState): number =>
   state.records.totalAsked === 0 ? 0 : state.records.totalCorrect / state.records.totalAsked;

@@ -9,6 +9,7 @@ export type Skill =
   | 'prefecture'
   | 'prefectureToDept'
   | 'code'
+  | 'codeToDept'
   | 'capital'
   | 'capitalToCountry'
   | 'flag';
@@ -108,16 +109,40 @@ function pickDistractors<T extends Territory>(
   groupOf: (t: T) => string,
   count: number,
   rng: () => number,
+  bias: (candidate: T) => number = () => 1,
 ): T[] {
   const targetGroup = groupOf(target);
   const candidates = pool.filter((t) => t.id !== target.id);
   return weightedSample(
     candidates,
-    (candidate) => confusability(target, candidate, groupOf(candidate) === targetGroup),
+    (candidate) =>
+      confusability(target, candidate, groupOf(candidate) === targetGroup) * bias(candidate),
     count,
     rng,
   );
 }
+
+/**
+ * Departments were numbered alphabetically, so the numbers a player actually
+ * confuses are the adjacent ones — 33 and 34, not 33 and 59. A number question
+ * whose wrong answers are geographically chosen can be solved without knowing
+ * a single number.
+ */
+const numberOf = (id: string): number => Number.parseInt(id.replace(/\D/g, ''), 10);
+
+function codeProximity(target: Department, candidate: Department): number {
+  const a = numberOf(target.id);
+  const b = numberOf(candidate.id);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 1;
+
+  const gap = Math.abs(a - b);
+  if (gap <= 2) return 7;
+  if (gap <= 5) return 3.5;
+  if (gap <= 12) return 1.8;
+  return 1;
+}
+
+const CODE_SKILLS: ReadonlySet<Skill> = new Set(['code', 'codeToDept']);
 
 const CHOICE_COUNT = 4;
 
@@ -126,13 +151,16 @@ const nextId = (): string => `q${++sequence}`;
 
 type Built = Question | null;
 
-function departmentQuestion(
-  target: Department,
-  skill: Skill,
-  rng: () => number,
-): Built {
+function departmentQuestion(target: Department, skill: Skill, rng: () => number): Built {
   const pool = FRANCE.territories;
-  const distractors = pickDistractors(target, pool, (d) => d.regionId, CHOICE_COUNT - 1, rng);
+  const distractors = pickDistractors(
+    target,
+    pool,
+    (d) => d.regionId,
+    CHOICE_COUNT - 1,
+    rng,
+    CODE_SKILLS.has(skill) ? (candidate) => codeProximity(target, candidate) : undefined,
+  );
   const base = {
     id: nextId(),
     cardId: cardIdFor('france-departments', target.id, skill),
@@ -212,6 +240,22 @@ function departmentQuestion(
         ),
       };
 
+    case 'codeToDept':
+      return {
+        ...base,
+        mode: 'choice',
+        prompt: 'Quel département porte ce numéro ?',
+        subject: target.id,
+        choices: shuffle(
+          [target, ...distractors].map((d) => ({
+            id: d.id,
+            label: d.name,
+            detail: d.region,
+          })),
+          rng,
+        ),
+      };
+
     default:
       return null;
   }
@@ -264,7 +308,11 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
         flagCode: target.cca2,
         highlightId: target.d === '' ? undefined : target.id,
         choices: shuffle(
-          [target, ...distractors].map((c) => ({ id: c.id, label: c.capital, detail: c.subregion })),
+          [target, ...distractors].map((c) => ({
+            id: c.id,
+            label: c.capital,
+            detail: c.subregion,
+          })),
           rng,
         ),
       };
@@ -305,7 +353,7 @@ function countryQuestion(target: Country, skill: Skill, rng: () => number): Buil
 }
 
 export const SKILLS_BY_ATLAS: Record<AtlasId, readonly Skill[]> = {
-  'france-departments': ['name', 'locate', 'prefecture', 'code', 'prefectureToDept'],
+  'france-departments': ['name', 'locate', 'code', 'codeToDept', 'prefecture', 'prefectureToDept'],
   'world-countries': ['flag', 'name', 'locate', 'capital', 'capitalToCountry'],
 };
 
@@ -315,6 +363,7 @@ export const SKILL_NEEDS_SHAPE: Record<Skill, boolean> = {
   prefecture: true,
   prefectureToDept: false,
   code: false,
+  codeToDept: false,
   capital: false,
   capitalToCountry: false,
   flag: false,

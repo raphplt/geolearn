@@ -3,8 +3,10 @@ import { BREVETS, earnedBrevets, newBrevets } from '../src/game/brevets.ts';
 import { cartouchesOf, masteryOf } from '../src/game/mastery.ts';
 import { carnetPayout, isComplete, questsFor, QUESTS_PER_DAY } from '../src/game/quests.ts';
 import { MAX_RUNG } from '../src/game/ladder.ts';
+import { SKILLS_BY_ATLAS } from '../src/game/questions.ts';
 import { createRng, seedFrom } from '../src/game/rng.ts';
 import {
+  advance,
   answer,
   currentQuestion,
   expeditionConfig,
@@ -40,7 +42,7 @@ console.log('\n▸ Rangs');
 
   const france = ATLASES['france-departments'];
   const cards: Record<CardId, Card> = {};
-  const skills = ['name', 'locate', 'prefecture', 'code', 'prefectureToDept'];
+  const skills = SKILLS_BY_ATLAS['france-departments'];
   let promotions = 0;
   for (const territory of france.territories) {
     for (const skill of skills) {
@@ -55,7 +57,7 @@ console.log('\n▸ Rangs');
       promotions += MAX_LEVEL;
     }
   }
-  const mastery = masteryOf(cards, 'france-departments', france);
+  const mastery = masteryOf(cards, 'france-departments');
   const seals = cartouchesOf(mastery, 'france-departments', france).filter((c) => c.sealed).length;
   const full = earningsFor('expedition', blankSummary(), {
     promotions,
@@ -102,9 +104,10 @@ console.log('\n▸ Pouvoir d’achat');
           ? (question.choices.find((c) => c.id !== question.answerId)?.id ?? null)
           : '__faux__';
       session = answer(session, chosen, clock);
+      session = advance(session, clock);
     }
 
-    const before = masteryOf(cards, 'france-departments', ATLASES['france-departments']).mastered;
+    const before = masteryOf(cards, 'france-departments').mastered;
     let promotions = 0;
     for (const record of session.answers) {
       const card = cards[record.cardId] ?? createCard(record.cardId, clock);
@@ -112,7 +115,7 @@ console.log('\n▸ Pouvoir d’achat');
       if (next.level > card.level) promotions++;
       cards[record.cardId] = next;
     }
-    const after = masteryOf(cards, 'france-departments', ATLASES['france-departments']).mastered;
+    const after = masteryOf(cards, 'france-departments').mastered;
 
     const earnings = earningsFor('expedition', summarize(session, clock), {
       promotions,
@@ -125,9 +128,7 @@ console.log('\n▸ Pouvoir d’achat');
 
   const cheapest = Math.min(...HINTS.map((h) => h.price));
   const ink = INKS.find((i) => i.price > 0)!;
-  console.log(
-    `  · après 20 parties à 80 % : ${doublons} doublons, ${xp} xp (${rankFor(xp).name})`,
-  );
+  console.log(`  · après 20 parties à 80 % : ${doublons} doublons, ${xp} xp (${rankFor(xp).name})`);
   console.log(
     `  · soit ${Math.floor(doublons / cheapest)} indices, ou ${(doublons / ink.price).toFixed(1)} × « ${ink.name} »`,
   );
@@ -207,7 +208,6 @@ console.log('\n▸ Brevets');
     cards: {},
     xp: 0,
     longestStreak: 0,
-    bestExpedition: 0,
     floor: 0,
     bestCombo: 0,
   };
@@ -232,7 +232,6 @@ console.log('\n▸ Brevets');
     cards,
     xp: RANKS.at(-1)!.at,
     longestStreak: 365,
-    bestExpedition: 99_999,
     floor: 4,
     bestCombo: 200,
   };
@@ -247,10 +246,7 @@ console.log('\n▸ Brevets');
 
 console.log('\n▸ Comptoir');
 {
-  check(
-    INKS.filter((i) => i.price === 0).length === 1,
-    'une seule encre est offerte d’emblée',
-  );
+  check(INKS.filter((i) => i.price === 0).length === 1, 'une seule encre est offerte d’emblée');
   check(
     INKS.every((i, index) => index === 0 || i.price > 0),
     'les encres suivantes se paient',

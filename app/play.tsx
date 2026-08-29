@@ -1,429 +1,177 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, InteractionManager, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, BackHandler, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { router } from 'expo-router';
 import Animated, {
   Easing,
-  FadeIn,
-  FadeOut,
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ATLASES } from '@/data';
-import { failure, milestone, success, tap } from '@/fx/haptics';
+import type { Territory } from '@/data/types';
+import { failure, milestone, success } from '@/fx/haptics';
+import { probe } from '@/fx/probe';
 import type { Question } from '@/game/questions';
-import { comboMultiplier, currentQuestion, RULES, summarize } from '@/game/session';
-import type { HintId } from '@/game/economy';
+import { comboMultiplier, currentQuestion, summarize } from '@/game/session';
 import { AtlasMap, type TerritoryState } from '@/map/AtlasMap';
 import { assistFrame, highlightFrame } from '@/map/framing';
+import { warmHitIndex } from '@/map/geometry';
 import { useProgress } from '@/store/progress';
 import { useSession } from '@/store/session';
 import { useTheme } from '@/theme';
 import { Button } from '@/ui/Button';
 import { CompassRose } from '@/ui/brand/CompassRose';
-import { IconHull } from '@/ui/icons';
-import { Flag } from '@/ui/Flag';
-import { PaperSurface } from '@/ui/PaperSurface';
+import { ChoiceRow } from '@/ui/game/ChoiceRow';
+import { HintBar } from '@/ui/game/HintBar';
+import { QuestionPrompt } from '@/ui/game/QuestionPrompt';
+import { SessionHeader } from '@/ui/game/SessionHeader';
+import { ListRow } from '@/ui/List';
+import { useReducedMotion } from '@/ui/motion';
+import { Sheet } from '@/ui/Sheet';
 import { Text } from '@/ui/Text';
-
-const FEEDBACK_MS = { correct: 620, wrong: 1_500 };
-
-type Feedback = {
-  question: Question;
-  chosenId: string | null;
-  correct: boolean;
-};
 
 export default function Play() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const reduced = useReducedMotion();
 
   const session = useSession((s) => s.session);
-  const summary = useSession((s) => s.summary);
-  const pending = useSession((s) => s.pending);
-  const startPending = useSession((s) => s.startPending);
   const submit = useSession((s) => s.answer);
-  const recordSession = useProgress((s) => s.recordSession);
+  const step = useSession((s) => s.advance);
+  const repair = useSession((s) => s.repair);
   const setReport = useSession((s) => s.setReport);
+  const recordSession = useProgress((s) => s.recordSession);
 
-  const [weighed, setWeighed] = useState(false);
+  const hints = useProgress((s) => s.purse.hints);
+  const spendHint = useProgress((s) => s.spendHint);
 
-  useEffect(() => {
-    if (!pending) return;
-    const task = InteractionManager.runAfterInteractions(() => startPending());
-    return () => task.cancel();
-  }, [pending, startPending]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setWeighed(true), 620);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [dropped, setDropped] = useState<string[]>([]);
   const [sounded, setSounded] = useState(false);
-  const hints = useProgress((s) => s.purse.hints);
-  const useHint = useProgress((s) => s.useHint);
-  const repair = useSession((s) => s.repair);
-  const feedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const recorded = useRef(false);
-  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [listing, setListing] = useState(false);
 
+  const dwell = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recorded = useRef(false);
+
+  const phase = session?.phase ?? 'asking';
+  const question = session ? currentQuestion(session) : null;
+  const last = session?.last ?? null;
+  const atlasId = session?.config.atlasId;
+
+  useEffect(() => {
+    if (!atlasId) return;
+    warmHitIndex(ATLASES[atlasId]);
+  }, [atlasId]);
+
+  /*
+   * `recorded` guards the callbacks, not the render: by the time it is true the
+   * screen is already on its way out, and reading a ref while rendering makes
+   * the result depend on when React happens to run.
+   */
   const rescuable =
     session?.status === 'finished' &&
     session.endReason === 'wrecked' &&
-    (hints['seconde-chance'] ?? 0) > 0 &&
-    !recorded.current;
+    (hints['seconde-chance'] ?? 0) > 0;
 
-  useEffect(() => {
-    if (!session || session.status !== 'finished' || !summary || recorded.current) return;
-    if (rescuable) return;
+  /* Move on: to the next question while playing, to the log once finished. */
+  const forward = useCallback(() => {
+    if (dwell.current) {
+      clearTimeout(dwell.current);
+      dwell.current = null;
+    }
+    const current = useSession.getState().session;
+    if (!current) return;
+
+    if (current.status === 'playing') {
+      if (current.phase !== 'feedback') return;
+      setDropped([]);
+      setSounded(false);
+      step();
+      return;
+    }
+
+    if (recorded.current) return;
     recorded.current = true;
-    setReport(recordSession(session, summary));
-    exitTimer.current = setTimeout(() => router.replace('/results'), feedback ? 700 : 0);
-  }, [session, summary, recordSession, setReport, feedback, rescuable]);
 
-  useEffect(
-    () => () => {
-      if (feedbackTimer.current) clearTimeout(feedbackTimer.current);
-      if (exitTimer.current) clearTimeout(exitTimer.current);
-    },
-    [],
-  );
+    const done = useSession.getState().summary;
+    if (!done || done.asked === 0) {
+      useSession.getState().clear();
+      router.replace('/');
+      return;
+    }
+    setReport(recordSession(current, done));
+    router.replace('/results');
+  }, [step, setReport, recordSession]);
 
-  const question = session ? currentQuestion(session) : null;
-  const shown = feedback?.question ?? question;
+  /*
+   * One timer governs the whole end of a question: the verdict is read, then
+   * the next one arrives — or the log does. A session can also end with no
+   * verdict on screen, when the time bank runs out mid-question; that case
+   * leaves immediately rather than stranding the player on a dead board.
+   */
+  useEffect(() => {
+    if (!session || rescuable) return;
 
-  const handleAnswer = useCallback(
+    const showing = session.phase === 'feedback';
+    if (showing) probe.reacted('answer');
+
+    const finished = session.status === 'finished';
+    if (!showing && !finished) return;
+
+    const wait = showing
+      ? session.last?.correct
+        ? theme.motion.feedback.correct
+        : theme.motion.feedback.wrong
+      : 0;
+
+    dwell.current = setTimeout(forward, wait);
+    return () => {
+      if (dwell.current) clearTimeout(dwell.current);
+      dwell.current = null;
+    };
+  }, [session, rescuable, forward, theme.motion.feedback]);
+
+  const answer = useCallback(
     (chosenId: string | null) => {
-      if (!session || feedback || !question) return;
+      const current = useSession.getState().session;
+      if (!current || current.phase !== 'asking') return;
 
-      const correct = chosenId === question.answerId;
-      const nextCombo = correct ? session.combo + 1 : 0;
+      const asked = currentQuestion(current);
+      if (!asked) return;
+
+      const correct = chosenId === asked.answerId;
+      const nextCombo = correct ? current.combo + 1 : 0;
+
+      probe.touched('answer');
 
       if (!correct) failure();
-      else if (comboMultiplier(nextCombo) > comboMultiplier(session.combo)) milestone();
+      else if (comboMultiplier(nextCombo) > comboMultiplier(current.combo)) milestone();
       else success();
 
-      setFeedback({ question, chosenId, correct });
-      const next = submit(chosenId);
-
-      const finished = next?.status === 'finished';
-      if (finished) return;
-
-      feedbackTimer.current = setTimeout(
-        () => {
-          setFeedback(null);
-          setDropped([]);
-          setSounded(false);
-        },
-        correct ? FEEDBACK_MS.correct : FEEDBACK_MS.wrong,
-      );
+      submit(chosenId);
     },
-    [session, question, feedback, submit],
+    [submit],
   );
 
   const states = useMemo(() => {
     const out: Record<string, TerritoryState> = {};
-    if (!shown) return out;
-    if (feedback) {
-      out[feedback.question.answerId] = feedback.correct ? 'correct' : 'reveal';
-      if (!feedback.correct && feedback.chosenId) out[feedback.chosenId] = 'wrong';
-    } else if (shown.mode === 'choice' && shown.highlightId) {
-      out[shown.highlightId] = 'target';
+    if (!question) return out;
+    if (phase === 'feedback' && last) {
+      out[question.answerId] = last.correct ? 'correct' : 'reveal';
+      if (!last.correct && last.chosenId) out[last.chosenId] = 'wrong';
+    } else if (question.mode === 'choice' && question.highlightId) {
+      out[question.highlightId] = 'target';
     }
     return out;
-  }, [feedback, shown]);
+  }, [phase, last, question]);
 
-  if (pending || !weighed) return <Casting ready={Boolean(session)} />;
-
-  if (session?.status === 'finished' && rescuable) {
-    return (
-      <View style={[styles.centered, { backgroundColor: theme.colors.canvas }]}>
-        <Wreck
-          onRepair={() => {
-            if (!useHint('seconde-chance')) return;
-            milestone();
-            setFeedback(null);
-            setDropped([]);
-            setSounded(false);
-            repair();
-          }}
-          onGiveUp={() => {
-            tap();
-            if (!session || !summary) return;
-            recorded.current = true;
-            setReport(recordSession(session, summary));
-            router.replace('/results');
-          }}
-        />
-      </View>
-    );
-  }
-
-  if (!session || !shown) {
-    if (session) return <Casting ready />;
-    return (
-      <View style={[styles.centered, { backgroundColor: theme.colors.canvas }]}>
-        <Text variant="note" color="textSecondary">
-          Aucune partie en cours.
-        </Text>
-        <Pressable onPress={() => router.replace('/')} style={{ marginTop: theme.space.lg }}>
-          <Text variant="label" color="danger">
-            Revenir à l’accueil
-          </Text>
-        </Pressable>
-      </View>
-    );
-  }
-
-  const atlas = ATLASES[shown.atlasId];
-
-  const showMap = shown.mode === 'locate' || Boolean(shown.highlightId) || Boolean(feedback);
-
-  const frame = sounded
-    ? assistFrame(atlas, shown.answerId, 0.26)
-    : shown.mode === 'choice'
-      ? highlightFrame(atlas, shown.answerId, session.config.assist)
-      : assistFrame(atlas, shown.answerId, session.config.assist);
-
-  return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
-      <SessionHeader />
-
-      <View style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.md }}>
-        <Prompt question={shown} feedback={feedback} />
-      </View>
-
-      {showMap ? (
-        <AtlasMap
-          atlas={atlas}
-          states={states}
-          onSelect={shown.mode === 'locate' && !feedback ? handleAnswer : undefined}
-          labels="none"
-          viewBox={frame}
-          style={{ flex: 1, marginHorizontal: theme.space.lg }}
-        />
-      ) : (
-        <View style={styles.emptyStage} pointerEvents="none">
-          <CompassRose size={260} points={16} dial opacity={0.08} />
-        </View>
-      )}
-
-      <HintBar
-        question={shown}
-        held={hints}
-        used={{ dropped: dropped.length > 0, sounded }}
-        locked={Boolean(feedback)}
-        onDrop={() => {
-          if (!useHint('delester')) return;
-          if (shown.mode !== 'choice') return;
-          const wrong = shown.choices.filter((c) => c.id !== shown.answerId).map((c) => c.id);
-          for (let i = wrong.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [wrong[i], wrong[j]] = [wrong[j]!, wrong[i]!];
-          }
-          milestone();
-          setDropped(wrong.slice(0, 2));
-        }}
-        onSound={() => {
-          if (!useHint('sonder')) return;
-          milestone();
-          setSounded(true);
-        }}
-      />
-
-      {shown.mode === 'choice' ? (
-        <ScrollView
-          style={{ flexGrow: 0 }}
-          contentContainerStyle={{
-            paddingHorizontal: theme.space.xl,
-            paddingBottom: insets.bottom + theme.space.lg,
-            gap: theme.space.sm,
-          }}
-        >
-          {shown.choices.map((choice) => (
-            <ChoiceRow
-              key={choice.id}
-              label={choice.label}
-              flagCode={choice.flagCode}
-              state={
-                !feedback
-                  ? dropped.includes(choice.id)
-                    ? 'dimmed'
-                    : 'idle'
-                  : choice.id === feedback.question.answerId
-                    ? 'correct'
-                    : choice.id === feedback.chosenId
-                      ? 'wrong'
-                      : 'dimmed'
-              }
-              onPress={() => handleAnswer(choice.id)}
-              disabled={Boolean(feedback) || dropped.includes(choice.id)}
-            />
-          ))}
-        </ScrollView>
-      ) : (
-        <View style={{ height: insets.bottom + theme.space.lg }} />
-      )}
-
-    </View>
-  );
-}
-
-function HintBar({
-  question,
-  held,
-  used,
-  locked,
-  onDrop,
-  onSound,
-}: {
-  question: Question;
-  held: Partial<Record<HintId, number>>;
-  used: { dropped: boolean; sounded: boolean };
-  locked: boolean;
-  onDrop: () => void;
-  onSound: () => void;
-}) {
-  const theme = useTheme();
-
-  const canDrop =
-    question.mode === 'choice' && !used.dropped && (held.delester ?? 0) > 0 && !locked;
-  const canSound =
-    question.mode === 'locate' && !used.sounded && (held.sonder ?? 0) > 0 && !locked;
-
-  if (!canDrop && !canSound) return null;
-
-  return (
-    <View
-      style={{
-        flexDirection: 'row',
-        gap: theme.space.sm,
-        paddingHorizontal: theme.space.lg,
-        paddingTop: theme.space.sm,
-      }}
-    >
-      {canDrop ? (
-        <HintChip label="Délester" count={held.delester ?? 0} onPress={onDrop} />
-      ) : null}
-      {canSound ? (
-        <HintChip label="Sonder" count={held.sonder ?? 0} onPress={onSound} />
-      ) : null}
-    </View>
-  );
-}
-
-function HintChip({
-  label,
-  count,
-  onPress,
-}: {
-  label: string;
-  count: number;
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${label}, ${count} en réserve`}
-      style={{
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: theme.space.xs,
-        paddingHorizontal: theme.space.md,
-        paddingVertical: theme.space.sm,
-        borderRadius: theme.radius.pill,
-        backgroundColor: theme.colors.infoSoft,
-        borderWidth: theme.borderWidth.hair,
-        borderColor: theme.colors.info,
-      }}
-    >
-      <Text variant="labelSm" color="info">
-        {label}
-      </Text>
-      <Text variant="numeralSm" color="info" tabular>
-        ×{count}
-      </Text>
-    </Pressable>
-  );
-}
-
-function Wreck({ onRepair, onGiveUp }: { onRepair: () => void; onGiveUp: () => void }) {
-  const theme = useTheme();
-
-  return (
-    <Animated.View
-      entering={FadeIn.duration(240)}
-      style={[
-        StyleSheet.absoluteFill,
-        {
-          backgroundColor: theme.colors.scrim,
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: theme.space.xl,
-        },
-      ]}
-    >
-      <PaperSurface
-        tone="raised"
-        bordered
-        radius="lg"
-        grain={0.3}
-        elevation="overlay"
-        style={{ padding: theme.space.xl, alignItems: 'center', gap: theme.space.md }}
-      >
-        <IconHull size={40} color={theme.colors.danger} />
-        <Text variant="titleLg" align="center">
-          Coque ouverte
-        </Text>
-        <Button label="Réparer la coque" tone="success" block onPress={onRepair} />
-        <Button label="Rentrer au port" variant="secondary" block onPress={onGiveUp} />
-      </PaperSurface>
-    </Animated.View>
-  );
-}
-
-function SessionHeader() {
-  const theme = useTheme();
-  const session = useSession((s) => s.session);
-  const expireSession = useSession((s) => s.expire);
-  const clearSession = useSession((s) => s.clear);
-  const recordSession = useProgress((s) => s.recordSession);
-
-  const progress = useSharedValue(1);
-  const expiresAt = session?.expiresAt ?? null;
-
-  useEffect(() => {
-    if (expiresAt === null) return;
-    const remaining = Math.max(0, expiresAt - Date.now());
-    progress.value = Math.min(1, remaining / RULES.timeCap);
-    progress.value = withTiming(0, { duration: remaining, easing: Easing.linear });
-
-    const timer = setTimeout(() => expireSession(), remaining);
-    return () => clearTimeout(timer);
-  }, [expiresAt, progress, expireSession]);
-
-  const barStyle = useAnimatedStyle(() => ({
-    width: `${Math.max(0, progress.value) * 100}%`,
-  }));
-
-  const quit = () => {
-    if (!session) {
+  const quit = useCallback(() => {
+    const current = useSession.getState().session;
+    if (!current || current.answers.length === 0) {
+      useSession.getState().clear();
       router.replace('/');
-      return;
-    }
-
-    if (session.answers.length === 0) {
-      clearSession();
-      router.replace('/');
-      return;
+      return true;
     }
 
     Alert.alert(
@@ -436,263 +184,273 @@ function SessionHeader() {
           style: 'destructive',
           onPress: () => {
             const now = Date.now();
-            recordSession({ ...session, score: 0 }, { ...summarize(session, now), score: 0 }, now);
-            clearSession();
+            recorded.current = true;
+            recordSession({ ...current, score: 0 }, { ...summarize(current, now), score: 0 }, now);
+            useSession.getState().clear();
             router.replace('/');
           },
         },
       ],
     );
-  };
+    return true;
+  }, [recordSession]);
 
-  if (!session) return null;
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', quit);
+    return () => subscription.remove();
+  }, [quit]);
 
-  const multiplier = comboMultiplier(session.combo);
-  const total = session.config.mode === 'expedition' ? null : session.questions.length;
+  if (!session || !question) {
+    return (
+      <View style={[styles.centered, { backgroundColor: theme.colors.canvas }]}>
+        <Text variant="note" color="textSecondary">
+          Aucune partie en cours.
+        </Text>
+        <Button
+          label="Revenir au port"
+          variant="secondary"
+          onPress={() => router.replace('/')}
+          style={{ marginTop: theme.space.lg }}
+        />
+      </View>
+    );
+  }
+
+  const atlas = ATLASES[question.atlasId];
+  const showMap =
+    question.mode === 'locate' || Boolean(question.highlightId) || phase === 'feedback';
+
+  const frame = sounded
+    ? assistFrame(atlas, question.answerId, 0.26)
+    : question.mode === 'choice'
+      ? highlightFrame(atlas, question.answerId, session.config.assist)
+      : assistFrame(atlas, question.answerId, session.config.assist);
+
+  const locked = phase === 'feedback';
 
   return (
-    <View style={{ paddingHorizontal: theme.space.lg }}>
-      <View style={styles.headerRow}>
-        <Pressable
-          onPress={() => {
-            tap();
-            quit();
-          }}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Abandonner la partie"
-        >
-          <Text variant="title" color="textTertiary">
-            ✕
-          </Text>
-        </Pressable>
+    <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
+      <SessionHeader onQuit={quit} />
 
-        <View style={{ alignItems: 'center' }}>
-          <Text variant="numeral" tabular>
-            {session.score}
-          </Text>
-          {total ? (
-            <Text variant="caption" color="textTertiary" tabular>
-              {Math.min(session.index + 1, total)} / {total}
-            </Text>
-          ) : null}
+      <QuestionStage index={session.index} reduced={reduced}>
+        <View style={{ paddingHorizontal: theme.space.lg, paddingVertical: theme.space.md }}>
+          <QuestionPrompt question={question} verdict={locked ? last : null} />
         </View>
 
-        <ComboBadge combo={session.combo} multiplier={multiplier} />
-      </View>
+        {showMap ? (
+          <AtlasMap
+            atlas={atlas}
+            states={states}
+            onSelect={question.mode === 'locate' && !locked ? answer : undefined}
+            labels="none"
+            viewBox={frame}
+            zoomable={false}
+            style={{ flex: 1, marginHorizontal: theme.space.lg }}
+          />
+        ) : (
+          <View style={styles.emptyStage} pointerEvents="none">
+            <CompassRose size={260} points={16} dial opacity={0.08} />
+          </View>
+        )}
 
-      {session.config.lives !== undefined ? (
-        <View style={{ flexDirection: 'row', gap: 4, marginTop: theme.space.xs }}>
-          {Array.from({ length: session.config.lives }, (_, i) => (
-            <IconHull
-              key={i}
-              size={15}
-              active={i >= session.wrecks}
-              color={
-                i >= session.wrecks ? theme.colors.textSecondary : theme.colors.dangerSoft
-              }
+        <HintBar
+          question={question}
+          held={hints}
+          used={{ dropped: dropped.length > 0, sounded }}
+          locked={locked}
+          onList={question.mode === 'locate' ? () => setListing(true) : undefined}
+          onDrop={() => {
+            if (question.mode !== 'choice') return;
+            if (!spendHint('delester')) return;
+            milestone();
+            const wrong = question.choices
+              .filter((c) => c.id !== question.answerId)
+              .map((c) => c.id);
+            setDropped(wrong.slice(0, 2));
+          }}
+          onSound={() => {
+            if (!spendHint('sonder')) return;
+            milestone();
+            setSounded(true);
+          }}
+        />
+
+        {question.mode === 'choice' ? (
+          <ScrollView
+            style={{ flexGrow: 0 }}
+            contentContainerStyle={{
+              paddingHorizontal: theme.space.lg,
+              paddingBottom: insets.bottom + theme.space.lg,
+              paddingTop: theme.space.sm,
+              gap: theme.space.sm,
+            }}
+          >
+            {question.choices.map((choice) => (
+              <ChoiceRow
+                key={choice.id}
+                label={choice.label}
+                flagCode={choice.flagCode}
+                state={
+                  !locked
+                    ? dropped.includes(choice.id)
+                      ? 'dimmed'
+                      : 'idle'
+                    : choice.id === question.answerId
+                      ? 'correct'
+                      : choice.id === last?.chosenId
+                        ? 'wrong'
+                        : 'dimmed'
+                }
+                onPress={() => answer(choice.id)}
+                disabled={locked || dropped.includes(choice.id)}
+              />
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={{ height: insets.bottom + theme.space.lg }} />
+        )}
+      </QuestionStage>
+
+      {/* During a verdict, anywhere on the screen means "next". */}
+      {locked && !rescuable ? (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={forward}
+          accessibilityRole="button"
+          accessibilityLabel="Question suivante"
+        />
+      ) : null}
+
+      <Sheet
+        visible={listing}
+        onClose={() => setListing(false)}
+        eyebrow="Sans pointer sur la carte"
+        title={question.subject || question.prompt}
+      >
+        <View style={{ paddingTop: theme.space.md }}>
+          {namedCandidates(atlas.territories, question).map((t, i) => (
+            <ListRow
+              key={t.id}
+              first={i === 0}
+              title={t.name}
+              onPress={() => {
+                setListing(false);
+                answer(t.id);
+              }}
             />
           ))}
         </View>
-      ) : null}
+      </Sheet>
 
-      {expiresAt !== null ? (
-        <View
-          style={{
-            height: 6,
-            borderRadius: 3,
-            backgroundColor: theme.colors.surfaceSunk,
-            overflow: 'hidden',
-            marginTop: theme.space.sm,
-          }}
-        >
-          <Animated.View
-            style={[{ height: '100%', backgroundColor: theme.colors.danger }, barStyle]}
-          />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function ComboBadge({ combo, multiplier }: { combo: number; multiplier: number }) {
-  const theme = useTheme();
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    if (combo === 0) return;
-    scale.value = withSpring(1.18, theme.motion.spring.pop, () => {
-      scale.value = withSpring(1, theme.motion.spring.pop);
-    });
-  }, [combo, scale, theme.motion.spring.pop]);
-
-  const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
-
-  return (
-    <Animated.View style={[{ minWidth: 62, alignItems: 'flex-end' }, style]}>
-      {combo > 0 ? (
-        <>
-          <Text variant="numeral" color={multiplier > 1 ? 'reward' : 'textSecondary'} tabular>
-            ×{multiplier}
-          </Text>
-        </>
-      ) : null}
-    </Animated.View>
-  );
-}
-
-function Prompt({ question, feedback }: { question: Question; feedback: Feedback | null }) {
-  const theme = useTheme();
-
-  const verdict = feedback
-    ? feedback.correct
-      ? { label: 'Juste', color: theme.colors.success }
-      : { label: answerLabel(feedback.question), color: theme.colors.danger }
-    : null;
-
-  return (
-    <View style={{ alignItems: 'center', gap: theme.space.md }}>
-      <View
-        style={{
-          paddingHorizontal: theme.space.lg,
-          paddingVertical: theme.space.sm,
-          borderRadius: theme.radius.pill,
-          backgroundColor: verdict
-            ? feedback?.correct
-              ? theme.colors.successSoft
-              : theme.colors.dangerSoft
-            : theme.colors.surfaceRaised,
-          borderWidth: theme.borderWidth.hair,
-          borderColor: verdict ? verdict.color : theme.colors.border,
-          maxWidth: '100%',
+      <Sheet
+        visible={Boolean(rescuable)}
+        onClose={() => {
+          setListing(false);
+          forward();
         }}
+        eyebrow="Avarie"
+        title="Coque ouverte"
+        footer={
+          <View style={{ gap: theme.space.sm }}>
+            <Button
+              label="Réparer la coque"
+              detail="Consomme une seconde chance"
+              tone="success"
+              block
+              onPress={() => {
+                if (!spendHint('seconde-chance')) return;
+                milestone();
+                setDropped([]);
+                setSounded(false);
+                repair();
+              }}
+            />
+            <Button label="Rentrer au port" variant="secondary" block onPress={forward} />
+          </View>
+        }
       >
-        <Text
-          variant="label"
-          align="center"
-          numberOfLines={2}
-          style={verdict ? { color: verdict.color } : undefined}
-        >
-          {verdict?.label ?? question.prompt}
-        </Text>
-      </View>
-
-      {question.flagCode && !question.subject ? (
-        <Flag cca2={question.flagCode} width={230} height={145} radius={theme.radius.sm} />
-      ) : null}
-
-      {question.subject ? (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
-          {question.flagCode ? (
-            <Flag cca2={question.flagCode} height={34} radius={theme.radius.xs} />
-          ) : null}
-          <Text variant="display" numberOfLines={2} align="center">
-            {question.subject}
+        <View style={{ paddingHorizontal: theme.space.xl, paddingTop: theme.space.sm }}>
+          <Text variant="bodySm" color="textSecondary">
+            La partie s’arrête ici, à moins de réparer. Le score et les réponses déjà données
+            restent acquis dans les deux cas.
           </Text>
         </View>
-      ) : null}
+      </Sheet>
     </View>
   );
 }
 
-function answerLabel(question: Question): string {
-  if (question.mode === 'choice') {
-    const answer = question.choices.find((c) => c.id === question.answerId);
-    return answer ? `C’était ${answer.label}` : '';
-  }
-  return `C’était ${question.subject}`;
-}
-
-type ChoiceState = 'idle' | 'correct' | 'wrong' | 'dimmed';
-
-function ChoiceRow({
-  label,
-  flagCode,
-  state,
-  onPress,
-  disabled,
+/**
+ * The next question slides in from the direction of progress, once, on the UI
+ * thread, without remounting the screen underneath.
+ */
+function QuestionStage({
+  index,
+  reduced,
+  children,
 }: {
-  label: string;
-  flagCode?: string;
-  state: ChoiceState;
-  onPress: () => void;
-  disabled: boolean;
+  index: number;
+  reduced: boolean;
+  children: React.ReactNode;
 }) {
   const theme = useTheme();
-  const pressed = useSharedValue(0);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * 0.02 }],
-  }));
-
-  const palette =
-    state === 'correct'
-      ? { bg: theme.colors.successSoft, border: theme.colors.success }
-      : state === 'wrong'
-        ? { bg: theme.colors.dangerSoft, border: theme.colors.danger }
-        : { bg: theme.colors.surfaceRaised, border: theme.colors.border };
-
-  return (
-    <Animated.View style={animatedStyle}>
-      <Pressable
-        onPress={onPress}
-        disabled={disabled}
-        onPressIn={() => {
-          pressed.value = withSpring(1, theme.motion.spring.snappy);
-        }}
-        onPressOut={() => {
-          pressed.value = withSpring(0, theme.motion.spring.snappy);
-        }}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.md,
-          minHeight: theme.hitTarget.comfortable,
-          paddingHorizontal: theme.space.lg,
-          borderRadius: theme.radius.md,
-          backgroundColor: palette.bg,
-          borderWidth: theme.borderWidth.thin,
-          borderColor: palette.border,
-          opacity: state === 'dimmed' ? theme.opacity.disabled : 1,
-        }}
-      >
-        {flagCode ? <Flag cca2={flagCode} height={22} radius={theme.radius.xs} /> : null}
-        <Text variant="label" style={{ flex: 1 }} numberOfLines={1}>
-          {label}
-        </Text>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
-function Casting({ ready }: { ready: boolean }) {
-  const theme = useTheme();
-  const spin = useSharedValue(0);
+  const shift = useSharedValue(0);
+  const first = useRef(true);
 
   useEffect(() => {
-    spin.value = withRepeat(
-      withTiming(1, { duration: 2600, easing: Easing.inOut(Easing.quad) }),
-      -1,
-      false,
-    );
-  }, [spin]);
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (reduced) return;
+    shift.value = 22;
+    shift.value = withTiming(0, {
+      duration: theme.motion.duration.base,
+      easing: Easing.out(Easing.quad),
+    });
+  }, [index, reduced, shift, theme.motion.duration.base]);
 
-  const style = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${spin.value * 360}deg` }],
-  }));
+  const style = useAnimatedStyle(() => ({ transform: [{ translateX: shift.value }] }));
 
-  return (
-    <Animated.View
-      exiting={FadeOut.duration(240)}
-      style={[styles.centered, { backgroundColor: theme.colors.canvas }]}
-    >
-      <Animated.View style={style}>
-        <CompassRose size={112} points={16} dial opacity={ready ? 0.5 : 0.32} />
-      </Animated.View>
-    </Animated.View>
-  );
+  return <Animated.View style={[{ flex: 1 }, style]}>{children}</Animated.View>;
+}
+
+const CANDIDATES = 6;
+
+/**
+ * Pointing at a shape is not available to everyone. The same question is
+ * answerable from a short alphabetical list of the territories a player could
+ * plausibly confuse with the right one.
+ */
+function namedCandidates(territories: readonly Territory[], question: Question): Territory[] {
+  const answer = territories.find((t) => t.id === question.answerId);
+  if (!answer) return [];
+
+  const byId = new Map(territories.map((t) => [t.id, t]));
+  const picked = new Map<string, Territory>([[answer.id, answer]]);
+
+  for (const id of answer.neighbors) {
+    const neighbour = byId.get(id);
+    if (neighbour) picked.set(id, neighbour);
+    if (picked.size >= CANDIDATES) break;
+  }
+
+  if (picked.size < CANDIDATES) {
+    const near = territories
+      .filter((t) => t.d !== '' && !picked.has(t.id))
+      .map((t) => ({
+        t,
+        d: Math.hypot(t.label[0] - answer.label[0], t.label[1] - answer.label[1]),
+      }))
+      .sort((a, b) => a.d - b.d);
+
+    for (const { t } of near) {
+      picked.set(t.id, t);
+      if (picked.size >= CANDIDATES) break;
+    }
+  }
+
+  return [...picked.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }
 
 const styles = StyleSheet.create({

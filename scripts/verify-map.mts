@@ -5,8 +5,7 @@ import { buildHitIndex, decodePath, hitTest, pointInRings } from '../src/map/geo
 import type { FranceAtlas, WorldAtlas, Territory, Atlas } from '../src/data/types.ts';
 
 const DATA_DIR = join(import.meta.dirname, '..', 'src', 'data');
-const load = <T,>(name: string): T =>
-  JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T;
+const load = <T,>(name: string): T => JSON.parse(readFileSync(join(DATA_DIR, name), 'utf8')) as T;
 
 let failures = 0;
 let checks = 0;

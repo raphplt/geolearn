@@ -56,10 +56,16 @@ for (const atlasId of Object.keys(ORDERS) as AtlasId[]) {
 
   const { ordered } = difficultyTable(atlasId);
   console.log(
-    `  · les plus abordables : ${ordered.slice(0, 5).map((t) => t.name).join(', ')}`,
+    `  · les plus abordables : ${ordered
+      .slice(0, 5)
+      .map((t) => t.name)
+      .join(', ')}`,
   );
   console.log(
-    `  · les plus obscurs   : ${ordered.slice(-5).map((t) => t.name).join(', ')}`,
+    `  · les plus obscurs   : ${ordered
+      .slice(-5)
+      .map((t) => t.name)
+      .join(', ')}`,
   );
 }
 
@@ -84,7 +90,11 @@ for (const atlasId of Object.keys(LADDERS) as AtlasId[]) {
   for (const rung of rungs) {
     const pool = poolAt(atlasId, rung.index).map((t) => t.id);
 
-    check(pool.length >= 8, `${atlasId} — échelon ${rung.index} : vivier suffisant`, `${pool.length}`);
+    check(
+      pool.length >= 8,
+      `${atlasId} — échelon ${rung.index} : vivier suffisant`,
+      `${pool.length}`,
+    );
     check(
       pool.length >= previousPool.length,
       `${atlasId} — échelon ${rung.index} : le vivier ne rétrécit pas`,
@@ -191,7 +201,11 @@ console.log('\n▸ Jaugeage');
     check(weak < middling, `${label} — un joueur faible est placé sous un joueur moyen`);
     check(middling < strong, `${label} — un joueur moyen est placé sous un joueur fort`);
     check(weak <= 1.2, `${label} — un joueur faible commence bas`, weak.toFixed(2));
-    check(strong >= 2.8, `${label} — un joueur fort n’est pas renvoyé au cabotage`, strong.toFixed(2));
+    check(
+      strong >= 2.8,
+      `${label} — un joueur fort n’est pas renvoyé au cabotage`,
+      strong.toFixed(2),
+    );
   }
 
   for (const atlasId of ['france-departments', 'world-countries'] as AtlasId[]) {

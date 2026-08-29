@@ -48,9 +48,7 @@ export function PaperSurface({
   const surfaceStyle: ViewStyle = {
     backgroundColor: background,
     borderRadius,
-    ...(bordered
-      ? { borderWidth: theme.borderWidth.hair, borderColor }
-      : null),
+    ...(bordered ? { borderWidth: theme.borderWidth.hair, borderColor } : null),
     ...(elevation !== 'none' ? theme.elevation[elevation] : null),
   };
 

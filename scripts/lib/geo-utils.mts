@@ -220,25 +220,27 @@ export function dissolveRings(rings: Position[][]): string {
 
   const geometries = rings.map((ring) => {
     const closed =
-      ring.length > 0 &&
-      (ring[0]![0] !== ring.at(-1)![0] || ring[0]![1] !== ring.at(-1)![1])
+      ring.length > 0 && (ring[0]![0] !== ring.at(-1)![0] || ring[0]![1] !== ring.at(-1)![1])
         ? [...ring, ring[0]!]
         : ring;
     return { type: 'Polygon' as const, coordinates: [closed] };
   });
 
-  const topo = topology(
-    { land: { type: 'GeometryCollection', geometries } } as never,
-    1e5,
+  const topo = topology({ land: { type: 'GeometryCollection', geometries } } as never, 1e5);
+  const land = merge(
+    topo as never,
+    (topo.objects.land as never as { geometries: never[] }).geometries,
   );
-  const land = merge(topo as never, (topo.objects.land as never as { geometries: never[] }).geometries);
 
   const parts: string[] = [];
   for (const polygon of land.coordinates) {
     for (const ring of polygon) {
       parts.push(
         ring
-          .map((point, i) => `${i === 0 ? 'M' : 'L'}${Math.round(point[0] ?? 0)},${Math.round(point[1] ?? 0)}`)
+          .map(
+            (point, i) =>
+              `${i === 0 ? 'M' : 'L'}${Math.round(point[0] ?? 0)},${Math.round(point[1] ?? 0)}`,
+          )
           .join('') + 'Z',
       );
     }

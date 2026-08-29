@@ -1,4 +1,3 @@
-
 export const palette = {
   parchment: {
     50: '#FFFCF5',
@@ -230,14 +229,29 @@ export const elevation = {
   },
 } as const;
 
+/**
+ * One structural animation per navigation, and nothing decorative on top.
+ * `base` and `emphasis` cover everything ordinary; `ceremony` is reserved for
+ * the four moments that deserve it — a promotion, a brevet, a sealed cartouche,
+ * a rank. `instant` is the press response, and must never be scheduled behind
+ * another animation.
+ */
 export const motion = {
-  duration: { instant: 90, fast: 160, base: 240, slow: 380, deliberate: 620 },
+  duration: { instant: 90, fast: 140, base: 180, emphasis: 240, ceremony: 360 },
   spring: {
-    snappy: { damping: 18, stiffness: 260, mass: 0.9 },
-    needle: { damping: 11, stiffness: 140, mass: 1.1 },
-    sheet: { damping: 24, stiffness: 160, mass: 1.2 },
-    pop: { damping: 9, stiffness: 340, mass: 0.7 },
+    snappy: { damping: 20, stiffness: 340, mass: 0.7 },
+    needle: { damping: 13, stiffness: 180, mass: 1 },
+    sheet: { damping: 26, stiffness: 220, mass: 0.9 },
+    pop: { damping: 12, stiffness: 420, mass: 0.6 },
   },
+  /** Perceptual budgets, in milliseconds. Exit criteria of the audit. */
+  budget: {
+    touchResponse: 100,
+    perceptiblePause: 150,
+    loaderThreshold: 150,
+  },
+  /** How long a verdict stays on screen before the next question slides in. */
+  feedback: { correct: 420, wrong: 1_300 },
 } as const;
 
 export const hitTarget = { min: 44, comfortable: 56 } as const;

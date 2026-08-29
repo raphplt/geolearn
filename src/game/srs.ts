@@ -1,4 +1,3 @@
-
 export type CardId = string;
 
 export type MasteryLevel = 0 | 1 | 2 | 3 | 4 | 5;

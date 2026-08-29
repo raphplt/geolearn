@@ -13,13 +13,22 @@ export type Rung = {
   assist: number | null;
 };
 
+/*
+ * Le premier échelon ne peut pas être entièrement cartographique. « Reconnaître »
+ * et « situer » demandent tous deux la carte ; le numéro, lui, est une pure
+ * association — c'est le fait le plus emblématique du découpage français, et il
+ * n'a aucune raison d'attendre le troisième palier. Il s'apprend d'emblée dans
+ * les deux sens, parce qu'une correspondance qu'on ne sait lire que dans un sens
+ * n'est pas apprise.
+ */
 const FRANCE_LADDER: Rung[] = [
   {
     index: 0,
     name: 'Cabotage',
-    motto: 'Les quinze départements les plus connus, à reconnaître sur la carte.',
+    motto:
+      'Les quinze départements les plus connus : les reconnaître, les situer, et leurs numéros dans les deux sens.',
     share: 0.15,
-    skills: ['name', 'locate'],
+    skills: ['name', 'locate', 'code', 'codeToDept'],
     assist: 0.34,
   },
   {
@@ -27,23 +36,23 @@ const FRANCE_LADDER: Rung[] = [
     name: 'Petit large',
     motto: 'Trente départements, et leurs chefs-lieux.',
     share: 0.3,
-    skills: ['name', 'locate', 'prefecture'],
+    skills: ['name', 'locate', 'code', 'codeToDept', 'prefecture'],
     assist: 0.5,
   },
   {
     index: 2,
     name: 'Haute mer',
-    motto: 'La moitié de la France, numéros compris.',
+    motto: 'La moitié de la France, chefs-lieux à rebours compris.',
     share: 0.55,
-    skills: ['name', 'locate', 'prefecture', 'code'],
+    skills: ['name', 'locate', 'code', 'codeToDept', 'prefecture', 'prefectureToDept'],
     assist: 0.72,
   },
   {
     index: 3,
     name: 'Grand large',
-    motto: 'Quatre-vingts départements, et les questions à rebours.',
+    motto: 'Quatre-vingts départements, sans aucune aide.',
     share: 0.8,
-    skills: ['name', 'locate', 'prefecture', 'code', 'prefectureToDept'],
+    skills: ['name', 'locate', 'code', 'codeToDept', 'prefecture', 'prefectureToDept'],
     assist: null,
   },
   {
@@ -51,7 +60,7 @@ const FRANCE_LADDER: Rung[] = [
     name: 'Circumnavigation',
     motto: 'Les 101 départements, sans aucune aide.',
     share: 1,
-    skills: ['name', 'locate', 'prefecture', 'code', 'prefectureToDept'],
+    skills: ['name', 'locate', 'code', 'codeToDept', 'prefecture', 'prefectureToDept'],
     assist: null,
   },
 ];
@@ -76,15 +85,15 @@ const WORLD_LADDER: Rung[] = [
   {
     index: 2,
     name: 'Haute mer',
-    motto: 'La moitié du monde, capitales comprises.',
+    motto: 'La moitié du monde, capitales comprises — dans les deux sens.',
     share: 0.55,
-    skills: ['flag', 'name', 'locate', 'capital'],
+    skills: ['flag', 'name', 'locate', 'capital', 'capitalToCountry'],
     assist: 0.72,
   },
   {
     index: 3,
     name: 'Grand large',
-    motto: 'Cent trente pays, et les questions à rebours.',
+    motto: 'Cent trente pays, sans aucune aide.',
     share: 0.8,
     skills: ['flag', 'name', 'locate', 'capital', 'capitalToCountry'],
     assist: null,

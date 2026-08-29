@@ -144,7 +144,9 @@ console.log('\n▸ Marque');
 try {
   execFileSync('rsvg-convert', ['--version'], { stdio: 'ignore' });
 } catch {
-  console.error('  ! rsvg-convert introuvable — icônes non régénérées (assets existants conservés)');
+  console.error(
+    '  ! rsvg-convert introuvable — icônes non régénérées (assets existants conservés)',
+  );
   process.exit(0);
 }
 

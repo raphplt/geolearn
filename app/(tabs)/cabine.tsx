@@ -1,17 +1,16 @@
-import { Alert, Pressable, ScrollView, View } from 'react-native';
+import { Alert, ScrollView, View } from 'react-native';
 import { router } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ATLASES } from '@/data';
-import { FLAG_ATTRIBUTION } from '@/data/flags';
-import { currentRung, rungAt } from '@/game/ladder';
+import { ATLASES, type AtlasId } from '@/data';
+import { currentRung, MAX_RUNG, rungAt } from '@/game/ladder';
 import { masteryOf } from '@/game/mastery';
 import { tap } from '@/fx/haptics';
 import { selectAccuracy, useProgress } from '@/store/progress';
 import { useTheme, type SchemePreference } from '@/theme';
-import { Hud, type HudChip } from '@/ui/Hud';
-import { IconAtlas, IconCabine, IconHourglass } from '@/ui/icons';
+import { ListRow, ListSection, ListSwitch } from '@/ui/List';
+import { Segmented } from '@/ui/Segmented';
 import { Text } from '@/ui/Text';
-import { Toggle } from '@/ui/Toggle';
 
 const SCHEMES: { value: SchemePreference; label: string }[] = [
   { value: 'light', label: 'Jour' },
@@ -19,8 +18,19 @@ const SCHEMES: { value: SchemePreference; label: string }[] = [
   { value: 'system', label: 'Auto' },
 ];
 
+const ATLAS_NAME: Record<AtlasId, string> = {
+  'france-departments': 'France',
+  'world-countries': 'Monde',
+};
+
+const ATLAS_DETAIL: Record<AtlasId, string> = {
+  'france-departments': '101 départements, leurs numéros et leurs chefs-lieux',
+  'world-countries': '193 États, capitales et drapeaux',
+};
+
 export default function Cabine() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   const settings = useProgress((s) => s.settings);
   const records = useProgress((s) => s.records);
@@ -28,32 +38,14 @@ export default function Cabine() {
   const cards = useProgress((s) => s.cards);
   const accuracy = useProgress(selectAccuracy);
   const updateSettings = useProgress((s) => s.updateSettings);
+  const setStudying = useProgress((s) => s.setStudying);
   const resetProgress = useProgress((s) => s.resetProgress);
 
-  const atlasId = settings.lastAtlas;
-  const rung = rungAt(atlasId, currentRung(atlasId, cards, settings.floor));
-
-  const chips: HudChip[] = [
-    { key: 'sessions', value: `${records.totalSessions}`, tone: 'text', icon: IconCabine },
-    {
-      key: 'time',
-      value: formatPlayTime(records.totalPlayTime),
-      tone: 'reward',
-      icon: IconHourglass,
-    },
-    {
-      key: 'accuracy',
-      value: records.totalAsked > 0 ? `${Math.round(accuracy * 100)} %` : '—',
-      tone: 'success',
-      icon: IconAtlas,
-    },
-  ];
+  const studying = settings.studying;
 
   const confirmReset = () => {
-    tap();
     const learned =
-      masteryOf(cards, 'france-departments', ATLASES['france-departments']).started +
-      masteryOf(cards, 'world-countries', ATLASES['world-countries']).started;
+      masteryOf(cards, 'france-departments').started + masteryOf(cards, 'world-countries').started;
 
     Alert.alert(
       'Tout effacer ?',
@@ -68,162 +60,156 @@ export default function Cabine() {
   };
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.colors.canvas }}>
-      <Hud chips={chips} />
-
-      <ScrollView
-        contentContainerStyle={{
-          paddingHorizontal: theme.space.xl,
-          paddingTop: theme.space.lg,
-          paddingBottom: theme.space.xxl,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
-        <Segmented
-          label="Thème"
-          options={SCHEMES}
-          value={settings.scheme}
-          onChange={(scheme) => updateSettings({ scheme })}
-        />
-
-        <View
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            minHeight: theme.hitTarget.comfortable,
-            marginTop: theme.space.xl,
-          }}
-        >
-          <Text variant="label" style={{ flex: 1 }}>
-            Retour haptique
-          </Text>
-          <Toggle
-            value={settings.haptics}
-            onChange={(haptics) => updateSettings({ haptics })}
-            label="Retour haptique"
-          />
-        </View>
-
-        <Text variant="cartouche" color="textTertiary" style={{ marginTop: theme.space.xl }}>
-          Niveau · {rung.name}
-        </Text>
-        <Action
-          label="Refaire le jaugeage"
-          onPress={() => {
-            tap();
-            router.push({ pathname: '/jaugeage', params: { from: 'cabine' } });
-          }}
-        />
-
-        <Action
-          label="Revoir la présentation"
-          onPress={() => {
-            tap();
-            updateSettings({ onboarded: false });
-            router.replace('/onboarding');
-          }}
-        />
-        <Action label="Effacer la progression" tone="danger" onPress={confirmReset} />
-
-        <Text variant="caption" color="textQuiet" style={{ marginTop: theme.space.xxl }}>
-          {ATLASES['france-departments'].attribution}
-        </Text>
-        <Text variant="caption" color="textQuiet" style={{ marginTop: theme.space.sm }}>
-          {ATLASES['world-countries'].attribution}
-        </Text>
-        <Text variant="caption" color="textQuiet" style={{ marginTop: theme.space.sm }}>
-          {FLAG_ATTRIBUTION}
-        </Text>
-      </ScrollView>
-    </View>
-  );
-}
-
-function Segmented<T extends string>({
-  label,
-  options,
-  value,
-  onChange,
-  style,
-}: {
-  label: string;
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (next: T) => void;
-  style?: object;
-}) {
-  const theme = useTheme();
-
-  return (
-    <View style={style}>
-      <Text variant="cartouche" color="textTertiary" style={{ marginBottom: theme.space.sm }}>
-        {label}
-      </Text>
+    <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
       <View
         style={{
-          flexDirection: 'row',
-          padding: 3,
-          gap: 3,
-          borderRadius: theme.radius.md,
-          backgroundColor: theme.colors.surfaceSunk,
+          paddingHorizontal: theme.space.lg,
+          minHeight: theme.hitTarget.comfortable,
+          justifyContent: 'center',
         }}
       >
-        {options.map((option) => {
-          const selected = option.value === value;
-          return (
-            <Pressable
-              key={option.value}
-              onPress={() => {
-                tap();
-                onChange(option.value);
-              }}
-              accessibilityRole="radio"
-              accessibilityState={{ selected }}
-              style={{
-                flex: 1,
-                minHeight: theme.hitTarget.min - 6,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: theme.radius.sm,
-                backgroundColor: selected ? theme.colors.surfaceRaised : 'transparent',
-              }}
-            >
-              <Text variant="label" color={selected ? 'text' : 'textTertiary'}>
-                {option.label}
-              </Text>
-            </Pressable>
-          );
-        })}
+        <Text variant="title">Cabine</Text>
       </View>
-    </View>
-  );
-}
 
-function Action({
-  label,
-  tone = 'info',
-  onPress,
-}: {
-  label: string;
-  tone?: 'info' | 'danger';
-  onPress: () => void;
-}) {
-  const theme = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={{
-        minHeight: theme.hitTarget.comfortable,
-        justifyContent: 'center',
-        marginTop: theme.space.md,
-      }}
-    >
-      <Text variant="label" color={tone}>
-        {label}
-      </Text>
-    </Pressable>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: theme.space.xxl }}
+        showsVerticalScrollIndicator={false}
+      >
+        <ListSection title="Affichage" style={{ marginTop: theme.space.md }}>
+          <View
+            style={{
+              paddingHorizontal: theme.space.lg,
+              paddingVertical: theme.space.sm,
+            }}
+          >
+            <Segmented
+              options={SCHEMES}
+              value={settings.scheme}
+              onChange={(scheme) => updateSettings({ scheme })}
+              accessibilityLabel="Thème"
+            />
+          </View>
+          <ListSwitch
+            title="Retour haptique"
+            detail="Une vibration courte à la réponse, à la série et à l’avarie."
+            value={settings.haptics}
+            onChange={(haptics) => updateSettings({ haptics })}
+          />
+        </ListSection>
+
+        <ListSection
+          title="Ce que vous apprenez"
+          footer="Les deux atlas partagent une seule file de révision : ce qui s’efface passe devant, quel que soit l’atlas."
+          style={{ marginTop: theme.space.xl }}
+        >
+          {(Object.keys(ATLASES) as AtlasId[]).map((atlasId, i) => {
+            const on = studying.includes(atlasId);
+            return (
+              <ListSwitch
+                key={atlasId}
+                first={i === 0}
+                title={ATLAS_NAME[atlasId]}
+                detail={
+                  on && studying.length === 1
+                    ? 'Le seul atlas en cours : il ne peut pas être retiré'
+                    : ATLAS_DETAIL[atlasId]
+                }
+                value={on}
+                onChange={(next) =>
+                  setStudying(
+                    next ? [...studying, atlasId] : studying.filter((id) => id !== atlasId),
+                  )
+                }
+              />
+            );
+          })}
+        </ListSection>
+
+        <ListSection
+          title="Niveau de départ"
+          footer="Chaque atlas a son propre niveau : on peut être aguerri sur la France et débutant sur le monde."
+          style={{ marginTop: theme.space.xl }}
+        >
+          {(Object.keys(ATLASES) as AtlasId[])
+            .filter((id) => studying.includes(id))
+            .map((atlasId, i) => {
+              const floor = settings.floors[atlasId] ?? 0;
+              const rung = rungAt(atlasId, currentRung(atlasId, cards, floor));
+              return (
+                <ListRow
+                  key={atlasId}
+                  first={i === 0}
+                  title={ATLAS_NAME[atlasId]}
+                  detail={rung.motto}
+                  meta={`${rung.index + 1}/${MAX_RUNG + 1}`}
+                  chevron
+                  onPress={() =>
+                    router.push({
+                      pathname: '/jaugeage',
+                      params: { atlas: atlasId, from: 'cabine' },
+                    })
+                  }
+                />
+              );
+            })}
+        </ListSection>
+
+        <ListSection title="Vos relevés" style={{ marginTop: theme.space.xl }}>
+          <ListRow first title="Parties jouées" meta={`${records.totalSessions}`} />
+          <ListRow title="Temps passé" meta={formatPlayTime(records.totalPlayTime)} />
+          <ListRow
+            title="Précision d’ensemble"
+            meta={records.totalAsked > 0 ? `${Math.round(accuracy * 100)} %` : '—'}
+          />
+          <ListRow title="Plus longue série quotidienne" meta={`${daily.longestStreak} j`} />
+        </ListSection>
+
+        <ListSection title="À propos" style={{ marginTop: theme.space.xl }}>
+          <ListRow
+            first
+            title="Revoir la présentation"
+            chevron
+            onPress={() => {
+              updateSettings({ onboarded: false });
+              router.replace('/onboarding');
+            }}
+          />
+          <ListRow
+            title="Sources et attributions"
+            chevron
+            onPress={() => router.push('/attributions')}
+          />
+        </ListSection>
+
+        {__DEV__ ? (
+          <ListSection
+            title="Développement"
+            footer="Compte les touchers au-dessus de 100 ms et les blocages du fil JavaScript au-dessus de 150 ms."
+            style={{ marginTop: theme.space.xl }}
+          >
+            <ListSwitch
+              first
+              title="Sonde de fluidité"
+              value={settings.probe}
+              onChange={(value) => updateSettings({ probe: value })}
+            />
+          </ListSection>
+        ) : null}
+
+        <ListSection style={{ marginTop: theme.space.xxl }}>
+          <ListRow
+            first
+            title="Effacer la progression"
+            detail="Cartes, brevets, doublons et séries. Définitif."
+            tone="danger"
+            onPress={() => {
+              tap();
+              confirmReset();
+            }}
+          />
+        </ListSection>
+      </ScrollView>
+    </View>
   );
 }
 
