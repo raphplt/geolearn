@@ -1,6 +1,6 @@
 import type { AtlasId } from '@/data';
 import type { Atlas, Territory } from '@/data/types';
-import { parseCardId } from './questions';
+import { parseCardId, playablePool } from './questions';
 import { MASTERED_LEVEL, type Card, type CardId } from './srs';
 
 export type Mastery = {
@@ -10,11 +10,7 @@ export type Mastery = {
   total: number;
 };
 
-export function masteryOf(
-  cards: Readonly<Record<CardId, Card>>,
-  atlasId: AtlasId,
-  atlas: Atlas<Territory>,
-): Mastery {
+export function masteryOf(cards: Readonly<Record<CardId, Card>>, atlasId: AtlasId): Mastery {
   const byTerritory = new Map<string, number>();
 
   for (const [cardId, card] of Object.entries(cards)) {
@@ -34,14 +30,28 @@ export function masteryOf(
     byTerritory,
     mastered,
     started: byTerritory.size,
-    total: atlas.territories.filter((t) => t.d !== '').length,
+    total: playableIds(atlasId).size,
   };
 }
 
-export const masteryRatio = ({
-  mastered,
-  total,
-}: Pick<Mastery, 'mastered' | 'total'>): number => (total === 0 ? 0 : mastered / total);
+/**
+ * The denominator is what the game can actually ask about — the 101
+ * departments, the 193 member states — and not what the atlas happens to be
+ * able to draw. Every screen counts the same set.
+ */
+const playableCache = new Map<AtlasId, Set<string>>();
+
+export function playableIds(atlasId: AtlasId): Set<string> {
+  let ids = playableCache.get(atlasId);
+  if (!ids) {
+    ids = new Set(playablePool(atlasId).map((t) => t.id));
+    playableCache.set(atlasId, ids);
+  }
+  return ids;
+}
+
+export const masteryRatio = ({ mastered, total }: Pick<Mastery, 'mastered' | 'total'>): number =>
+  total === 0 ? 0 : mastered / total;
 
 export type Cartouche = {
   id: string;
@@ -68,9 +78,10 @@ export function cartouchesOf(
   atlas: Atlas<Territory>,
 ): Cartouche[] {
   const groups = new Map<string, Cartouche>();
+  const playable = playableIds(atlasId);
 
   for (const territory of atlas.territories) {
-    if (territory.d === '' && atlasId === 'france-departments') continue;
+    if (!playable.has(territory.id)) continue;
     const group = groupOf(atlasId, territory);
     if (!group) continue;
 
@@ -103,7 +114,7 @@ export function sealedIds(
   atlasId: AtlasId,
   atlas: Atlas<Territory>,
 ): string[] {
-  const mastery = masteryOf(cards, atlasId, atlas);
+  const mastery = masteryOf(cards, atlasId);
   return cartouchesOf(mastery, atlasId, atlas)
     .filter((c) => c.sealed)
     .map((c) => `${atlasId}:${c.id}`);

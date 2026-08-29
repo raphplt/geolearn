@@ -1,16 +1,22 @@
 import { MAX_RUNG } from '../src/game/ladder.ts';
 import { dueCount, dueQueue } from '../src/game/revision.ts';
 import {
+  advance,
   answer,
+  expire,
   comboMultiplier,
   currentQuestion,
   dailyConfig,
   expeditionConfig,
   lessonConfig,
   mend,
+  pointsFor,
   RULES,
+  suspend,
+  wake,
   startSession,
   summarize,
+  timeRemaining,
   emojiSummary,
   type SessionState,
 } from '../src/game/session.ts';
@@ -45,6 +51,7 @@ function play(
         ? (question.choices.find((c) => c.id !== question.answerId)?.id ?? null)
         : '__faux__';
     session = answer(session, chosen, clock);
+    session = advance(session, clock);
   }
   return session;
 }
@@ -106,6 +113,7 @@ console.log('▸ Expédition');
     clock += 300;
     s = answer(s, q.answerId, clock);
     if (s.expiresAt !== null && s.expiresAt - clock > RULES.timeCap + 1) overflow = true;
+    s = advance(s, clock);
   }
   check(!overflow, 'la réserve de temps reste sous son plafond');
 }
@@ -119,12 +127,6 @@ console.log('\n▸ Barème');
 
   let previous = Infinity;
   let monotone = true;
-  for (let ms = 0; ms <= 10_000; ms += 500) {
-    const s = summarize(startSession(dailyConfig('world-countries', 1), 0), 0);
-    void s;
-    const bonus = comboMultiplier(0);
-    void bonus;
-  }
   const { speedBonus, rewardDecay } = await import('../src/game/session.ts');
   check(rewardDecay(0) === 1, 'la récompense en temps est pleine au départ');
   check(rewardDecay(999) === RULES.minRewardFactor, 'l’érosion est bornée par le bas');
@@ -138,6 +140,113 @@ console.log('\n▸ Barème');
   check(monotone, 'le bonus de vitesse décroît sans jamais passer sous zéro');
   check(speedBonus(0) === RULES.maxSpeedBonus, 'réponse immédiate : bonus maximal');
   check(speedBonus(60_000) === 0, 'réponse très lente : aucun bonus');
+}
+
+console.log('\n▸ Machine d’états');
+{
+  let s = startSession(expeditionConfig('france-departments', 11, MAX_RUNG), 0);
+  const first = currentQuestion(s)!;
+
+  check(s.phase === 'asking', 'une partie s’ouvre sur une question, pas sur une correction');
+  check(s.index === 0, 'le compteur désigne la question affichée');
+
+  /* Le joueur réfléchit deux secondes, puis répond juste. */
+  s = answer(s, first.answerId, 2_000);
+
+  check(s.phase === 'feedback', 'répondre ouvre la correction');
+  check(s.index === 0, 'le compteur n’avance pas pendant la correction');
+  check(currentQuestion(s)?.id === first.id, 'la question corrigée reste celle qu’on voit');
+  check(
+    s.answers[0]!.elapsed === 2_000,
+    'le temps de réponse ne mesure que la réflexion',
+    `${s.answers[0]!.elapsed} ms`,
+  );
+
+  const doubled = answer(s, '__faux__', 2_100);
+  check(doubled === s, 'un second toucher pendant la correction est sans effet');
+  check(advance(s, 2_100) !== s, 'la correction peut être abrégée à tout moment');
+
+  const bank = timeRemaining(s, 2_000);
+
+  /* La correction reste affichée 1,3 s, puis la question suivante apparaît. */
+  const next = advance(s, 3_300);
+
+  check(next.phase === 'asking', 'la suite est une question, pas une correction');
+  check(next.index === 1, 'le compteur avance avec la question, pas avec la réponse');
+  check(next.askedAt === 3_300, 'le chronomètre repart quand la question s’affiche');
+  check(
+    Math.abs(timeRemaining(next, 3_300) - bank) < 1,
+    'la réserve de temps ne coule pas pendant la correction',
+    `${timeRemaining(next, 3_300)} contre ${bank}`,
+  );
+  check(advance(next, 3_400) === next, 'on ne saute pas une question sans y répondre');
+
+  /* Une seconde de réflexion doit coûter une seconde, pas une seconde plus la correction. */
+  const second = currentQuestion(next)!;
+  const after = answer(next, second.answerId, 4_300);
+  check(
+    after.answers[1]!.elapsed === 1_000,
+    'la correction précédente ne s’ajoute pas au temps de la question suivante',
+    `${after.answers[1]!.elapsed} ms`,
+  );
+  check(
+    after.answers[1]!.points === pointsFor(1_000, 1),
+    'le score de la réponse est celui de sa réflexion',
+    `${after.answers[1]!.points} contre ${pointsFor(1_000, 1)}`,
+  );
+  check(
+    pointsFor(1_000, 1) > pointsFor(2_300, 1),
+    'et il aurait bel et bien été raboté si la correction comptait',
+  );
+}
+
+console.log('\n▸ Mise en arrière-plan');
+{
+  let s = startSession(expeditionConfig('france-departments', 21, MAX_RUNG), 0);
+  const question = currentQuestion(s)!;
+
+  /* Le joueur répond au téléphone deux minutes au milieu d’une question. */
+  const bank = timeRemaining(s, 3_000);
+  s = suspend(s, 3_000);
+  check(s.suspendedAt === 3_000, 'la partie se met en veille avec l’application');
+  check(
+    timeRemaining(s, 999_999) === bank,
+    'le sablier se fige, quelle que soit la durée de l’absence',
+  );
+  check(suspend(s, 9_000) === s, 'une seconde mise en veille ne décale rien');
+  check(expire(s, 999_999) === s, 'la réserve de temps n’expire pas pendant l’absence');
+
+  s = wake(s, 123_000);
+  check(s.suspendedAt === null, 'le retour lève la veille');
+  check(
+    Math.abs(timeRemaining(s, 123_000) - bank) < 1,
+    'la réserve de temps est rendue intacte',
+    `${timeRemaining(s, 123_000)} contre ${bank}`,
+  );
+
+  const answered = answer(s, question.answerId, 124_000);
+  check(
+    answered.answers[0]!.elapsed === 4_000,
+    'les deux minutes d’absence ne comptent pas comme du temps de réflexion',
+    `${answered.answers[0]!.elapsed} ms`,
+  );
+  check(
+    summarize(answered, 124_000).duration === 4_000,
+    'ni comme du temps de jeu',
+    `${summarize(answered, 124_000).duration} ms`,
+  );
+
+  /* Mise en veille pendant une correction : la pause en cours est préservée. */
+  const reading = suspend(answered, 124_500);
+  const back = wake(reading, 200_000);
+  check(
+    back.pausedAt === answered.pausedAt! + (200_000 - 124_500),
+    'une veille pendant la correction ne mange pas la correction',
+  );
+  check(
+    advance(back, 200_200).expiresAt === advance(answered, 124_700).expiresAt! + 75_500,
+    'et la reprise repart exactement d’où elle s’était arrêtée',
+  );
 }
 
 console.log('\n▸ Relevé quotidien');
@@ -167,7 +276,12 @@ console.log('\n▸ Relevé quotidien');
 
   const finished = play(a, { skill: 0.7, thinkMs: 2_500, rng: createRng(1) });
   const grid = emojiSummary(finished, key);
-  console.log(`  · grille partageable :\n${grid.split('\n').map((l) => `      ${l}`).join('\n')}`);
+  console.log(
+    `  · grille partageable :\n${grid
+      .split('\n')
+      .map((l) => `      ${l}`)
+      .join('\n')}`,
+  );
   check(finished.status === 'finished', 'le relevé se termine');
   check(
     (grid.match(/🟩|🟥/gu) ?? []).length === finished.answers.length,
@@ -212,7 +326,9 @@ console.log('\n▸ Atlas monde');
     rng: createRng(5),
   });
   const s = summarize(session, session.startedAt + 60_000);
-  console.log(`  · ${s.asked} questions, ${s.score} pts, précision ${Math.round(s.accuracy * 100)} %`);
+  console.log(
+    `  · ${s.asked} questions, ${s.score} pts, précision ${Math.round(s.accuracy * 100)} %`,
+  );
   check(s.asked > 10, 'le mode monde produit assez de questions');
 
   const noCapital = session.questions.filter(
@@ -275,7 +391,11 @@ console.log('\n▸ Avaries');
   check(s.wrecks === wounded - 1, 'la seconde chance répare une avarie');
   check(s.answers.length === 0, 'elle efface la réponse fautive');
   check(currentQuestion(s)?.id === first.id, 'elle rend la question ratée');
-  check(s.expiresAt === timeBefore, 'elle ne rend pas le temps consommé');
+  check(
+    s.expiresAt! - 1_200 === timeBefore! - 1_000,
+    'elle ne rend pas la pénalité de temps',
+    `${s.expiresAt} contre ${timeBefore}`,
+  );
 }
 
 console.log('\n▸ File de révision');
@@ -293,7 +413,11 @@ console.log('\n▸ File de révision');
   });
 
   cards['france-departments:33:name'] = make('france-departments:33:name', 2, now - 5 * 60_000);
-  cards['france-departments:59:locate'] = make('france-departments:59:locate', 1, now - 60 * 60_000);
+  cards['france-departments:59:locate'] = make(
+    'france-departments:59:locate',
+    1,
+    now - 60 * 60_000,
+  );
   cards['france-departments:69:prefecture'] = make(
     'france-departments:69:prefecture',
     2,
@@ -323,7 +447,12 @@ console.log('\n▸ File de révision');
   );
 
   const lesson = startSession(
-    lessonConfig('france-departments', 7, MAX_RUNG, queue.map((d) => d.cardId)),
+    lessonConfig(
+      'france-departments',
+      7,
+      MAX_RUNG,
+      queue.map((d) => d.cardId),
+    ),
     now,
   );
   check(
@@ -341,7 +470,12 @@ console.log('\n▸ File de révision');
   );
 
   const again = startSession(
-    lessonConfig('france-departments', 7, MAX_RUNG, queue.map((d) => d.cardId)),
+    lessonConfig(
+      'france-departments',
+      7,
+      MAX_RUNG,
+      queue.map((d) => d.cardId),
+    ),
     now + 5_000,
   );
   check(

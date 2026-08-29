@@ -1,7 +1,14 @@
-import { useMemo, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View } from 'react-native';
 import { router } from 'expo-router';
-import Animated, { FadeIn, SlideInRight, SlideOutLeft } from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ATLASES, type AtlasId } from '@/data';
@@ -9,32 +16,34 @@ import type { Country, Department, Territory } from '@/data/types';
 import { currentRung, undiscovered } from '@/game/ladder';
 import { seedFrom } from '@/game/rng';
 import { discoveryConfig, DISCOVERY_BATCH } from '@/game/session';
-import { tap } from '@/fx/haptics';
 import { AtlasMap } from '@/map/AtlasMap';
 import { focusFrame } from '@/map/framing';
-import { useProgress } from '@/store/progress';
+import { warmHitIndex } from '@/map/geometry';
+import { selectFloor, useProgress } from '@/store/progress';
 import { useSession } from '@/store/session';
 import { useTheme } from '@/theme';
 import { Button } from '@/ui/Button';
 import { Flag } from '@/ui/Flag';
-import { PaperSurface } from '@/ui/PaperSurface';
+import { useReducedMotion } from '@/ui/motion';
+import { ScreenHeader } from '@/ui/ScreenHeader';
 import { Text } from '@/ui/Text';
+
+const SWIPE_DISTANCE = 60;
 
 export default function Decouverte() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
+  const reduced = useReducedMotion();
 
   const settings = useProgress((s) => s.settings);
   const cards = useProgress((s) => s.cards);
-  const prepare = useSession((s) => s.prepare);
+  const start = useSession((s) => s.start);
 
   const atlasId = settings.lastAtlas;
   const atlas = ATLASES[atlasId];
+  const floor = useProgress((s) => selectFloor(s, atlasId));
 
-  const rungIndex = useMemo(
-    () => currentRung(atlasId, cards, settings.floor),
-    [atlasId, cards, settings.floor],
-  );
+  const rungIndex = useMemo(() => currentRung(atlasId, cards, floor), [atlasId, cards, floor]);
 
   const [batch] = useState<Territory[]>(() =>
     undiscovered(atlasId, cards, rungIndex).slice(0, DISCOVERY_BATCH),
@@ -43,13 +52,19 @@ export default function Decouverte() {
   const [index, setIndex] = useState(0);
   const territory = batch[index];
 
-  const quit = () => {
-    tap();
-    router.replace('/');
-  };
+  useEffect(() => {
+    warmHitIndex(atlas);
+  }, [atlas]);
 
-  const verify = () => {
-    prepare(
+  const go = useCallback(
+    (delta: number) => {
+      setIndex((i) => Math.min(batch.length - 1, Math.max(0, i + delta)));
+    },
+    [batch.length],
+  );
+
+  const verify = useCallback(() => {
+    start(
       discoveryConfig(
         atlasId,
         seedFrom(`discovery:${atlasId}:${batch.map((t) => t.id).join(',')}`),
@@ -58,7 +73,29 @@ export default function Decouverte() {
       ),
     );
     router.replace('/play');
-  };
+  }, [start, atlasId, batch, rungIndex]);
+
+  const swipe = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-18, 18])
+        .failOffsetY([-24, 24])
+        .onEnd((event) => {
+          if (event.translationX < -SWIPE_DISTANCE) runOnJS(go)(1);
+          else if (event.translationX > SWIPE_DISTANCE) runOnJS(go)(-1);
+        }),
+    [go],
+  );
+
+  const frame = useMemo(
+    () => (territory ? focusFrame(atlas, territory.id) : undefined),
+    [atlas, territory],
+  );
+
+  const states = useMemo(
+    () => (territory ? ({ [territory.id]: 'target' } as const) : undefined),
+    [territory],
+  );
 
   if (!territory) {
     return (
@@ -75,7 +112,7 @@ export default function Decouverte() {
         <Text variant="title" align="center">
           Tout le palier a été rencontré
         </Text>
-        <Button label="Revenir au port" variant="secondary" onPress={quit} />
+        <Button label="Revenir au port" variant="secondary" onPress={() => router.replace('/')} />
       </View>
     );
   }
@@ -84,58 +121,31 @@ export default function Decouverte() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
-      <View
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.md,
-          paddingHorizontal: theme.space.lg,
-          minHeight: theme.hitTarget.comfortable,
-        }}
-      >
-        <Text variant="cartouche" color="textTertiary">
-          Découverte
-        </Text>
-        <View style={{ flexDirection: 'row', gap: 5, flex: 1 }}>
-          {batch.map((t, i) => (
-            <View
-              key={t.id}
-              style={{
-                width: i === index ? 18 : 7,
-                height: 7,
-                borderRadius: 4,
-                backgroundColor:
-                  i <= index ? theme.colors.success : theme.colors.surfaceSunk,
-                borderWidth: theme.borderWidth.hair,
-                borderColor: i <= index ? theme.colors.success : theme.colors.borderSoft,
-              }}
-            />
-          ))}
+      <ScreenHeader
+        eyebrow="Découverte"
+        title={`${index + 1} sur ${batch.length}`}
+        onLeading={() => router.replace('/')}
+        trailing={<Dots total={batch.length} at={index} />}
+      />
+
+      <GestureDetector gesture={swipe}>
+        <View style={{ flex: 1, paddingHorizontal: theme.space.lg, gap: theme.space.md }}>
+          {/*
+            The map keeps its identity across steps: only the frame and the
+            highlighted shape change, so nothing is torn down and rebuilt.
+          */}
+          <AtlasMap
+            atlas={atlas}
+            states={states}
+            viewBox={frame}
+            labels="none"
+            zoomable={false}
+            style={{ flex: 1 }}
+          />
+
+          <Fiche atlasId={atlasId} territory={territory} step={index} reduced={reduced} />
         </View>
-        <Pressable onPress={quit} hitSlop={12} accessibilityRole="button" accessibilityLabel="Quitter">
-          <Text variant="labelSm" color="textSecondary">
-            Quitter
-          </Text>
-        </Pressable>
-      </View>
-
-      <Animated.View
-        key={territory.id}
-        entering={SlideInRight.duration(260)}
-        exiting={SlideOutLeft.duration(180)}
-        style={{ flex: 1, paddingHorizontal: theme.space.lg, gap: theme.space.md }}
-      >
-        <AtlasMap
-          atlas={atlas}
-          states={{ [territory.id]: 'target' }}
-          viewBox={focusFrame(atlas, territory.id)}
-          labels="none"
-          zoomable={false}
-          style={{ flex: 1 }}
-        />
-
-        <Fiche atlasId={atlasId} territory={territory} />
-      </Animated.View>
+      </GestureDetector>
 
       <View
         style={{
@@ -145,14 +155,13 @@ export default function Decouverte() {
         }}
       >
         <Button
-          label={last ? `Vérifier ces ${batch.length}` : 'Suivant'}
+          label={last ? `Vérifier ces ${batch.length}` : 'Territoire suivant'}
           size="lg"
           tone="success"
           block
           onPress={() => {
-            tap();
             if (last) verify();
-            else setIndex((i) => i + 1);
+            else go(1);
           }}
         />
       </View>
@@ -160,22 +169,70 @@ export default function Decouverte() {
   );
 }
 
-function Fiche({ atlasId, territory }: { atlasId: AtlasId; territory: Territory }) {
+function Dots({ total, at }: { total: number; at: number }) {
+  const theme = useTheme();
+  return (
+    <View style={{ flexDirection: 'row', gap: 5 }}>
+      {Array.from({ length: total }, (_, i) => (
+        <View
+          key={i}
+          style={{
+            width: i === at ? 16 : 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: i <= at ? theme.colors.success : theme.colors.surfaceSunk,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+/**
+ * The card is one persistent surface. Its content slides a few points in the
+ * direction of travel; it is never unmounted and remounted between steps.
+ */
+function Fiche({
+  atlasId,
+  territory,
+  step,
+  reduced,
+}: {
+  atlasId: AtlasId;
+  territory: Territory;
+  step: number;
+  reduced: boolean;
+}) {
   const theme = useTheme();
   const isFrance = atlasId === 'france-departments';
   const dept = isFrance ? (territory as Department) : null;
   const country = isFrance ? null : (territory as Country);
 
+  const shift = useSharedValue(0);
+  const previous = useRef(step);
+
+  useEffect(() => {
+    const direction = step >= previous.current ? 1 : -1;
+    previous.current = step;
+    if (reduced) return;
+    shift.value = 18 * direction;
+    shift.value = withTiming(0, {
+      duration: theme.motion.duration.base,
+      easing: Easing.out(Easing.quad),
+    });
+  }, [step, reduced, shift, theme.motion.duration.base]);
+
+  const style = useAnimatedStyle(() => ({ transform: [{ translateX: shift.value }] }));
+
   return (
-    <Animated.View entering={FadeIn.delay(120).duration(300)}>
-      <PaperSurface
-        tone="raised"
-        bordered
-        radius="lg"
-        grain={0.3}
-        elevation="lifted"
-        style={{ padding: theme.space.lg }}
-      >
+    <View
+      style={{
+        paddingVertical: theme.space.md,
+        borderTopWidth: theme.borderWidth.hair,
+        borderTopColor: theme.colors.border,
+      }}
+    >
+      <Animated.View style={style}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: theme.space.md }}>
           {country ? (
             <Flag cca2={country.cca2} height={40} label={country.name} />
@@ -188,8 +245,6 @@ function Fiche({ atlasId, territory }: { atlasId: AtlasId; territory: Territory 
                 borderRadius: theme.radius.sm,
                 alignItems: 'center',
                 backgroundColor: theme.colors.surfaceSunk,
-                borderWidth: theme.borderWidth.hair,
-                borderColor: theme.colors.border,
               }}
             >
               <Text variant="numeral" tabular>
@@ -216,8 +271,8 @@ function Fiche({ atlasId, territory }: { atlasId: AtlasId; territory: Territory 
             <Line label="Population" value={formatPopulation(country.population)} />
           ) : null}
         </View>
-      </PaperSurface>
-    </Animated.View>
+      </Animated.View>
+    </View>
   );
 }
 

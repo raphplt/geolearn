@@ -17,23 +17,14 @@ import Svg, { G, Path, Rect, Text as SvgText } from 'react-native-svg';
 
 import type { Atlas, BBox, Territory } from '@/data/types';
 import { tap } from '@/fx/haptics';
-import { useTheme } from '@/theme';
+import { useTheme, type Colors } from '@/theme';
 import { Text } from '@/ui/Text';
-import { buildHitIndex, hitTest } from './geometry';
+import { buildHitIndex, hitTest, peekHitIndex, type HitIndex } from './geometry';
 
 export type TerritoryState =
-  | 'idle'
-  | 'target'
-  | 'correct'
-  | 'wrong'
-  | 'reveal'
-  | 'mastered'
-  | 'sealed';
+  'idle' | 'target' | 'correct' | 'wrong' | 'reveal' | 'mastered' | 'sealed';
 
-export type LabelPolicy =
-  | 'none'
-  | 'adaptive'
-  | 'all';
+export type LabelPolicy = 'none' | 'adaptive' | 'all';
 
 export type AtlasMapProps = {
   atlas: Atlas<Territory>;
@@ -42,6 +33,8 @@ export type AtlasMapProps = {
   viewBox?: BBox;
   labels?: LabelPolicy;
   zoomable?: boolean;
+  /** A frame is a physical object; the Atlas tab draws the map itself instead. */
+  framed?: boolean;
   style?: StyleProp<ViewStyle>;
 };
 
@@ -53,6 +46,8 @@ const LABEL_POINTS = 11;
 
 const LABEL_CHAR_WIDTH = 0.46;
 
+const DENSE_STATES = 24;
+
 export function AtlasMap({
   atlas,
   states,
@@ -60,19 +55,50 @@ export function AtlasMap({
   viewBox,
   labels = 'none',
   zoomable = true,
+  framed = true,
   style,
 }: AtlasMapProps) {
   const theme = useTheme();
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const index = useMemo(() => (onSelect ? buildHitIndex(atlas) : null), [atlas, onSelect]);
+
+  /*
+   * Decoding an atlas into pointable rings is the single most expensive thing
+   * this component can do. It happens once per atlas, never during the render
+   * that first needs it, and only where a territory can actually be touched.
+   */
+  const [index, setIndex] = useState<HitIndex | null>(() =>
+    onSelect ? peekHitIndex(atlas) : null,
+  );
+
+  useEffect(() => {
+    if (!onSelect) return;
+    const warm = peekHitIndex(atlas);
+    if (warm) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- already built, no work
+      setIndex(warm);
+      return;
+    }
+    /* Deliberately one tick late: the point is to keep it off this render. */
+    const task = setTimeout(() => setIndex(buildHitIndex(atlas)), 0);
+    return () => clearTimeout(task);
+  }, [atlas, onSelect]);
 
   const fullFrame = useMemo<BBox>(
     () => viewBox ?? [0, 0, atlas.width, atlas.height],
     [viewBox, atlas.width, atlas.height],
   );
 
+  /*
+   * The frame follows the atlas until a gesture takes it over. Adjusting it
+   * during render rather than in an effect matters here: every question changes
+   * the viewBox, and an effect would cost a second commit each time.
+   */
   const [frame, setFrame] = useState<BBox>(fullFrame);
-  useEffect(() => setFrame(fullFrame), [fullFrame]);
+  const [framedOn, setFramedOn] = useState<BBox>(fullFrame);
+  if (framedOn !== fullFrame) {
+    setFramedOn(fullFrame);
+    setFrame(fullFrame);
+  }
 
   const frameWidth = frame[2] - frame[0];
   const frameHeight = frame[3] - frame[1];
@@ -144,12 +170,12 @@ export function AtlasMap({
   const reset = useCallback(() => setFrame(fullFrame), [fullFrame]);
 
   const gesture = useMemo(() => {
-    const tap = Gesture.Tap()
+    const pick = Gesture.Tap()
       .maxDuration(300)
       .maxDistance(12)
       .onEnd((event) => runOnJS(select)(event.x, event.y));
 
-    if (!zoomable) return tap;
+    if (!zoomable) return pick;
 
     const pan = Gesture.Pan()
       .averageTouches(true)
@@ -170,7 +196,7 @@ export function AtlasMap({
       })
       .onEnd(() => runOnJS(commit)(scale.value, translateX.value, translateY.value));
 
-    if (onSelect) return Gesture.Race(tap, Gesture.Simultaneous(pan, pinch));
+    if (onSelect) return Gesture.Race(pick, Gesture.Simultaneous(pan, pinch));
 
     const doubleTap = Gesture.Tap()
       .numberOfTaps(2)
@@ -204,34 +230,17 @@ export function AtlasMap({
     ],
   }));
 
+  /*
+   * Two regimes. A question colours one or two territories, so the resting map
+   * stays memoised and a thin overlay is painted over it. The Atlas colours
+   * almost everything, and a second full layer would double the tracing cost —
+   * there, the single land layer carries the colours itself.
+   */
+  const dense = states !== undefined && Object.keys(states).length > DENSE_STATES;
+
   const atlasPerPoint = frameWidth / (size.width > 0 ? size.width : 360);
   const zoomedIn = frameWidth < (fullFrame[2] - fullFrame[0]) * 0.66;
   const pt = useCallback((points: number) => points * atlasPerPoint, [atlasPerPoint]);
-
-  const shapes = useMemo(
-    () =>
-      atlas.territories.map((t) =>
-        t.d ? <TerritoryShape key={t.id} d={t.d} state={states?.[t.id] ?? 'idle'} /> : null,
-      ),
-    [atlas.territories, states],
-  );
-
-  const highlights = useMemo(
-    () =>
-      atlas.territories.map((t) => {
-        const state = states?.[t.id] ?? 'idle';
-        if (!t.d || state === 'idle' || state === 'mastered') return null;
-        return (
-          <TerritoryOutline
-            key={`${t.id}-top`}
-            d={t.d}
-            state={state}
-            sealed={state === 'sealed'}
-          />
-        );
-      }),
-    [atlas.territories, states],
-  );
 
   const labelled = useMemo(() => {
     if (labels === 'none') return [];
@@ -256,10 +265,11 @@ export function AtlasMap({
   }, [labels, atlas.territories, atlasPerPoint, frame]);
 
   const content = (
+    /* Rasterised only where the map is actually dragged and pinched. */
     <Animated.View
       style={[{ flex: 1 }, animatedStyle]}
-      renderToHardwareTextureAndroid
-      shouldRasterizeIOS
+      renderToHardwareTextureAndroid={zoomable}
+      shouldRasterizeIOS={zoomable}
     >
       <Svg
         width="100%"
@@ -267,58 +277,17 @@ export function AtlasMap({
         viewBox={`${frame[0]} ${frame[1]} ${frameWidth} ${frameHeight}`}
         preserveAspectRatio="xMidYMid meet"
       >
-        {atlas.frame ? (
-          <Path
-            d={atlas.frame}
-            fill={theme.colors.mapWater}
-            stroke={theme.colors.borderSoft}
-            strokeWidth={pt(1)}
-          />
-        ) : (
-          <Rect
-            x={fullFrame[0] - atlas.width}
-            y={fullFrame[1] - atlas.height}
-            width={atlas.width * 3}
-            height={atlas.height * 3}
-            fill={theme.colors.mapWater}
-          />
-        )}
-
-        {atlas.graticule ? (
-          <Path
-            d={atlas.graticule}
-            fill="none"
-            stroke={theme.colors.mapGraticule}
-            strokeWidth={pt(0.5)}
-            opacity={0.6}
-          />
-        ) : null}
-
-        {atlas.outline && !zoomedIn ? (
-          <G stroke={theme.colors.mapWaterDeep} fill="none" strokeLinejoin="round">
-            <Path d={atlas.outline} strokeWidth={pt(16)} opacity={0.18} />
-            <Path d={atlas.outline} strokeWidth={pt(6)} opacity={0.34} />
-          </G>
-        ) : null}
-
-        {atlas.insets.map((inset) => (
-          <G key={inset.id}>
-            <Rect
-              x={inset.frame[0]}
-              y={inset.frame[1]}
-              width={inset.frame[2] - inset.frame[0]}
-              height={inset.frame[3] - inset.frame[1]}
-              fill={theme.colors.mapWater}
-              stroke={theme.colors.mapStrokeStrong}
-              strokeWidth={pt(1)}
-              rx={pt(6)}
-              opacity={0.96}
-            />
-          </G>
-        ))}
+        <MapGround
+          atlas={atlas}
+          colors={theme.colors}
+          fullFrame={fullFrame}
+          zoomedIn={zoomedIn}
+          unit={atlasPerPoint}
+        />
 
         <G stroke={theme.colors.mapStroke} strokeWidth={pt(0.6)} strokeLinejoin="round">
-          {shapes}
+          <MapLand atlas={atlas} colors={theme.colors} states={dense ? states : undefined} />
+          {dense ? null : <MapAccents atlas={atlas} states={states} colors={theme.colors} />}
         </G>
 
         {atlas.outline ? (
@@ -332,8 +301,14 @@ export function AtlasMap({
           />
         ) : null}
 
-        <G strokeLinejoin="round" fill="none" opacity={0.95}>
-          {highlights}
+        {/* Widths live on the groups, so zooming never rebuilds the rings. */}
+        <G fill="none" strokeLinejoin="round" opacity={0.95}>
+          <G strokeWidth={pt(5)}>
+            <MapRings atlas={atlas} states={states} colors={theme.colors} thin={false} />
+          </G>
+          <G strokeWidth={pt(2.75)}>
+            <MapRings atlas={atlas} states={states} colors={theme.colors} thin />
+          </G>
         </G>
 
         {labelled.map((t) => (
@@ -344,23 +319,30 @@ export function AtlasMap({
             size={pt(LABEL_POINTS)}
             halo={pt(2.4)}
             text={t.name}
+            fill={theme.colors.mapLabel}
+            haloColor={theme.colors.mapLabelHalo}
+            font={theme.fontFamily.bodySemi}
           />
         ))}
       </Svg>
     </Animated.View>
   );
 
-  const zoomed = frameWidth < (fullFrame[2] - fullFrame[0]) - 1;
+  const zoomed = frameWidth < fullFrame[2] - fullFrame[0] - 1;
 
   return (
     <View
       style={[
         {
           overflow: 'hidden',
-          borderRadius: theme.radius.lg,
           backgroundColor: atlas.frame ? theme.colors.canvas : theme.colors.mapWater,
-          borderWidth: theme.borderWidth.thin,
-          borderColor: theme.colors.border,
+          ...(framed
+            ? {
+                borderRadius: theme.radius.lg,
+                borderWidth: theme.borderWidth.thin,
+                borderColor: theme.colors.border,
+              }
+            : null),
         },
         style,
       ]}
@@ -409,46 +391,172 @@ export function AtlasMap({
   );
 }
 
-const TerritoryShape = memo(function TerritoryShape({
-  d,
-  state,
+/**
+ * Water, graticule, coastal halo and insets. Depends on the atlas and the
+ * palette, never on the answer being played — so a question changes nothing
+ * here and React skips the whole subtree.
+ */
+const MapGround = memo(function MapGround({
+  atlas,
+  colors,
+  fullFrame,
+  zoomedIn,
+  unit,
 }: {
-  d: string;
-  state: TerritoryState;
+  atlas: Atlas<Territory>;
+  colors: Colors;
+  fullFrame: BBox;
+  zoomedIn: boolean;
+  unit: number;
 }) {
-  const theme = useTheme();
-  const fill =
-    state === 'correct'
-      ? theme.colors.mapCorrect
-      : state === 'wrong'
-        ? theme.colors.mapWrong
-        : state === 'target' || state === 'reveal'
-          ? theme.colors.mapTarget
-          : state === 'mastered' || state === 'sealed'
-            ? theme.colors.mapLand
-            : theme.colors.mapLandIdle;
+  const pt = (points: number): number => points * unit;
 
-  return <Path d={d} fill={fill} />;
+  return (
+    <>
+      {atlas.frame ? (
+        <Path
+          d={atlas.frame}
+          fill={colors.mapWater}
+          stroke={colors.borderSoft}
+          strokeWidth={pt(1)}
+        />
+      ) : (
+        <Rect
+          x={fullFrame[0] - atlas.width}
+          y={fullFrame[1] - atlas.height}
+          width={atlas.width * 3}
+          height={atlas.height * 3}
+          fill={colors.mapWater}
+        />
+      )}
+
+      {atlas.graticule ? (
+        <Path
+          d={atlas.graticule}
+          fill="none"
+          stroke={colors.mapGraticule}
+          strokeWidth={pt(0.5)}
+          opacity={0.6}
+        />
+      ) : null}
+
+      {atlas.outline && !zoomedIn ? (
+        <G stroke={colors.mapWaterDeep} fill="none" strokeLinejoin="round">
+          <Path d={atlas.outline} strokeWidth={pt(16)} opacity={0.18} />
+          <Path d={atlas.outline} strokeWidth={pt(6)} opacity={0.34} />
+        </G>
+      ) : null}
+
+      {atlas.insets.map((inset) => (
+        <Rect
+          key={inset.id}
+          x={inset.frame[0]}
+          y={inset.frame[1]}
+          width={inset.frame[2] - inset.frame[0]}
+          height={inset.frame[3] - inset.frame[1]}
+          fill={colors.mapWater}
+          stroke={colors.mapStrokeStrong}
+          strokeWidth={pt(1)}
+          rx={pt(6)}
+          opacity={0.96}
+        />
+      ))}
+    </>
+  );
 });
 
-const TerritoryOutline = memo(function TerritoryOutline({
-  d,
-  state,
-  sealed,
+/**
+ * Every territory, in one pass. Without `states` it depends on the atlas and a
+ * single colour, so panning, zooming and answering all leave it alone; with
+ * them it carries the whole Atlas colouring without a second layer.
+ */
+const MapLand = memo(function MapLand({
+  atlas,
+  colors,
+  states,
 }: {
-  d: string;
-  state: TerritoryState;
-  sealed: boolean;
+  atlas: Atlas<Territory>;
+  colors: Colors;
+  states?: Readonly<Record<string, TerritoryState>>;
 }) {
-  const theme = useTheme();
-  const stroke =
-    state === 'correct'
-      ? theme.colors.success
-      : state === 'wrong'
-        ? theme.colors.danger
-        : theme.colors.reward;
+  return (
+    <>
+      {atlas.territories.map((t) =>
+        t.d ? <Path key={t.id} d={t.d} fill={fillFor(colors, states?.[t.id])} /> : null,
+      )}
+    </>
+  );
+});
 
-  return <Path d={d} fill="none" stroke={stroke} strokeWidth={sealed ? 5 : 9} />;
+const ACCENT: Record<Exclude<TerritoryState, 'idle'>, keyof Colors> = {
+  target: 'mapTarget',
+  reveal: 'mapTarget',
+  correct: 'mapCorrect',
+  wrong: 'mapWrong',
+  mastered: 'mapLand',
+  sealed: 'mapLand',
+};
+
+const OUTLINE: Partial<Record<TerritoryState, keyof Colors>> = {
+  target: 'reward',
+  reveal: 'reward',
+  correct: 'success',
+  wrong: 'danger',
+  sealed: 'reward',
+};
+
+const fillFor = (colors: Colors, state: TerritoryState | undefined): string =>
+  !state || state === 'idle' ? colors.mapLandIdle : colors[ACCENT[state]];
+
+/** The sparse case: only the one or two territories a question is about. */
+const MapAccents = memo(function MapAccents({
+  atlas,
+  states,
+  colors,
+}: {
+  atlas: Atlas<Territory>;
+  states?: Readonly<Record<string, TerritoryState>>;
+  colors: Colors;
+}) {
+  if (!states) return null;
+
+  const painted = atlas.territories
+    .filter((t) => t.d && states[t.id] && states[t.id] !== 'idle')
+    .map((t) => <Path key={t.id} d={t.d} fill={fillFor(colors, states[t.id])} />);
+
+  return painted.length > 0 ? <>{painted}</> : null;
+});
+
+/**
+ * The ring drawn around a territory whose state deserves one. Carries no width
+ * of its own: the enclosing group holds it, so a zoom is one attribute change
+ * rather than a hundred new elements.
+ */
+const MapRings = memo(function MapRings({
+  atlas,
+  states,
+  colors,
+  thin,
+}: {
+  atlas: Atlas<Territory>;
+  states?: Readonly<Record<string, TerritoryState>>;
+  colors: Colors;
+  thin: boolean;
+}) {
+  if (!states) return null;
+
+  const rings: React.ReactElement[] = [];
+
+  for (const t of atlas.territories) {
+    const state = states[t.id];
+    if (!state || !t.d) continue;
+    const edge = OUTLINE[state];
+    if (!edge) continue;
+    if ((state === 'sealed') !== thin) continue;
+    rings.push(<Path key={t.id} d={t.d} stroke={colors[edge]} />);
+  }
+
+  return rings.length > 0 ? <>{rings}</> : null;
 });
 
 const MapLabel = memo(function MapLabel({
@@ -457,20 +565,25 @@ const MapLabel = memo(function MapLabel({
   text,
   size,
   halo,
+  fill,
+  haloColor,
+  font,
 }: {
   x: number;
   y: number;
   text: string;
   size: number;
   halo: number;
+  fill: string;
+  haloColor: string;
+  font: string;
 }) {
-  const theme = useTheme();
   const common = {
     x,
     y,
     fontSize: size,
     textAnchor: 'middle' as const,
-    fontFamily: theme.fontFamily.bodySemi,
+    fontFamily: font,
   };
 
   return (
@@ -478,14 +591,14 @@ const MapLabel = memo(function MapLabel({
       <SvgText
         {...common}
         fill="none"
-        stroke={theme.colors.mapLabelHalo}
+        stroke={haloColor}
         strokeWidth={halo}
         strokeLinejoin="round"
         opacity={0.9}
       >
         {text}
       </SvgText>
-      <SvgText {...common} fill={theme.colors.mapLabel}>
+      <SvgText {...common} fill={fill}>
         {text}
       </SvgText>
     </G>

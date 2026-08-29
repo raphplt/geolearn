@@ -19,12 +19,19 @@ export type BrevetContext = {
   cards: Readonly<Record<CardId, Card>>;
   xp: number;
   longestStreak: number;
-  bestExpedition: number;
   floor: number;
   bestCombo: number;
 };
 
-type Rule = Brevet & { earned: (context: BrevetContext) => boolean };
+export type Measure = { have: number; need: number };
+
+/**
+ * Every brevet is measured, not merely tested: the screen can then show how far
+ * the next one is, instead of a grid of grey discs that say nothing.
+ */
+type Rule = Brevet & { measure: (context: BrevetContext) => Measure };
+
+const at = (have: number, need: number): Measure => ({ have, need });
 
 const seenIn = (cards: BrevetContext['cards'], atlasId: AtlasId): number => {
   const seen = new Set<string>();
@@ -36,12 +43,10 @@ const seenIn = (cards: BrevetContext['cards'], atlasId: AtlasId): number => {
 };
 
 const masteredIn = (cards: BrevetContext['cards'], atlasId: AtlasId): number =>
-  masteryOf(cards, atlasId, ATLASES[atlasId]).mastered;
+  masteryOf(cards, atlasId).mastered;
 
 const sealsIn = (cards: BrevetContext['cards'], atlasId: AtlasId): number =>
-  cartouchesOf(masteryOf(cards, atlasId, ATLASES[atlasId]), atlasId, ATLASES[atlasId]).filter(
-    (c) => c.sealed,
-  ).length;
+  cartouchesOf(masteryOf(cards, atlasId), atlasId, ATLASES[atlasId]).filter((c) => c.sealed).length;
 
 const atMaxBox = (cards: BrevetContext['cards']): number =>
   Object.values(cards).filter((card) => card.level >= MAX_LEVEL).length;
@@ -53,8 +58,8 @@ const RULES: readonly Rule[] = [
     detail: 'Faire entrer un premier territoire en mémoire longue.',
     tier: 'cuivre',
     reward: 30,
-    earned: (c) =>
-      masteredIn(c.cards, 'france-departments') + masteredIn(c.cards, 'world-countries') >= 1,
+    measure: (c) =>
+      at(masteredIn(c.cards, 'france-departments') + masteredIn(c.cards, 'world-countries'), 1),
   },
   {
     id: 'cabotage',
@@ -62,7 +67,8 @@ const RULES: readonly Rule[] = [
     detail: 'Rencontrer vingt territoires.',
     tier: 'cuivre',
     reward: 40,
-    earned: (c) => seenIn(c.cards, 'france-departments') + seenIn(c.cards, 'world-countries') >= 20,
+    measure: (c) =>
+      at(seenIn(c.cards, 'france-departments') + seenIn(c.cards, 'world-countries'), 20),
   },
   {
     id: 'premier-sceau',
@@ -70,7 +76,8 @@ const RULES: readonly Rule[] = [
     detail: 'Sceller un cartouche — toute une région, entièrement sue.',
     tier: 'argent',
     reward: 120,
-    earned: (c) => sealsIn(c.cards, 'france-departments') + sealsIn(c.cards, 'world-countries') >= 1,
+    measure: (c) =>
+      at(sealsIn(c.cards, 'france-departments') + sealsIn(c.cards, 'world-countries'), 1),
   },
   {
     id: 'tour-de-france',
@@ -78,7 +85,7 @@ const RULES: readonly Rule[] = [
     detail: 'Avoir rencontré les 101 départements au moins une fois.',
     tier: 'argent',
     reward: 150,
-    earned: (c) => seenIn(c.cards, 'france-departments') >= 101,
+    measure: (c) => at(seenIn(c.cards, 'france-departments'), 101),
   },
   {
     id: 'tour-du-monde',
@@ -86,7 +93,7 @@ const RULES: readonly Rule[] = [
     detail: 'Avoir rencontré les 193 États membres au moins une fois.',
     tier: 'argent',
     reward: 200,
-    earned: (c) => seenIn(c.cards, 'world-countries') >= 193,
+    measure: (c) => at(seenIn(c.cards, 'world-countries'), 193),
   },
   {
     id: 'main-levee',
@@ -94,7 +101,7 @@ const RULES: readonly Rule[] = [
     detail: 'Tenir une série de vingt bonnes réponses.',
     tier: 'argent',
     reward: 100,
-    earned: (c) => c.bestCombo >= 20,
+    measure: (c) => at(c.bestCombo, 20),
   },
   {
     id: 'grand-large',
@@ -102,9 +109,14 @@ const RULES: readonly Rule[] = [
     detail: 'Atteindre le dernier échelon d’un atlas — plus aucune aide.',
     tier: 'argent',
     reward: 150,
-    earned: (c) =>
-      currentRung('france-departments', c.cards, c.floor) >= MAX_RUNG ||
-      currentRung('world-countries', c.cards, c.floor) >= MAX_RUNG,
+    measure: (c) =>
+      at(
+        Math.max(
+          currentRung('france-departments', c.cards, c.floor),
+          currentRung('world-countries', c.cards, c.floor),
+        ),
+        MAX_RUNG,
+      ),
   },
   {
     id: 'sept-jours',
@@ -112,7 +124,7 @@ const RULES: readonly Rule[] = [
     detail: 'Tenir une série de sept relevés quotidiens.',
     tier: 'cuivre',
     reward: 60,
-    earned: (c) => c.longestStreak >= 7,
+    measure: (c) => at(c.longestStreak, 7),
   },
   {
     id: 'cent-jours',
@@ -120,7 +132,7 @@ const RULES: readonly Rule[] = [
     detail: 'Tenir une série de cent relevés quotidiens.',
     tier: 'or',
     reward: 400,
-    earned: (c) => c.longestStreak >= 100,
+    measure: (c) => at(c.longestStreak, 100),
   },
   {
     id: 'cartographe',
@@ -128,7 +140,8 @@ const RULES: readonly Rule[] = [
     detail: 'Sceller dix cartouches.',
     tier: 'or',
     reward: 300,
-    earned: (c) => sealsIn(c.cards, 'france-departments') + sealsIn(c.cards, 'world-countries') >= 10,
+    measure: (c) =>
+      at(sealsIn(c.cards, 'france-departments') + sealsIn(c.cards, 'world-countries'), 10),
   },
   {
     id: 'memoire-longue',
@@ -136,7 +149,7 @@ const RULES: readonly Rule[] = [
     detail: `Porter cinquante cartes jusqu’à la boîte ${MAX_LEVEL}.`,
     tier: 'or',
     reward: 250,
-    earned: (c) => atMaxBox(c.cards) >= 50,
+    measure: (c) => at(atMaxBox(c.cards), 50),
   },
   {
     id: 'hexagone',
@@ -144,7 +157,7 @@ const RULES: readonly Rule[] = [
     detail: `Les 101 départements en boîte ${MASTERED_LEVEL} ou au-delà.`,
     tier: 'or',
     reward: 500,
-    earned: (c) => masteredIn(c.cards, 'france-departments') >= 101,
+    measure: (c) => at(masteredIn(c.cards, 'france-departments'), 101),
   },
   {
     id: 'amiraute',
@@ -152,19 +165,40 @@ const RULES: readonly Rule[] = [
     detail: 'Atteindre le rang d’Amiral.',
     tier: 'or',
     reward: 500,
-    earned: (c) => rankFor(c.xp).index >= MAX_RANK,
+    measure: (c) => at(rankFor(c.xp).index, MAX_RANK),
   },
 ];
 
-export const BREVETS: readonly Brevet[] = RULES.map(({ earned: _earned, ...brevet }) => brevet);
+export const BREVETS: readonly Brevet[] = RULES.map(({ measure: _measure, ...brevet }) => brevet);
 
 export const brevetById = (id: string): Brevet | undefined => BREVETS.find((b) => b.id === id);
 
 export function earnedBrevets(context: BrevetContext): string[] {
-  return RULES.filter((rule) => rule.earned(context)).map((rule) => rule.id);
+  return RULES.filter((rule) => {
+    const { have, need } = rule.measure(context);
+    return have >= need;
+  }).map((rule) => rule.id);
 }
 
-export function newBrevets(context: BrevetContext, already: Readonly<Record<string, number>>): {
+export type BrevetStanding = Brevet & Measure & { ratio: number; earned: boolean };
+
+/** Every brevet with how far along it is, closest to completion first. */
+export function brevetStandings(context: BrevetContext): BrevetStanding[] {
+  return RULES.map(({ measure, ...brevet }) => {
+    const { have, need } = measure(context);
+    const ratio = need === 0 ? 1 : Math.min(1, have / need);
+    return { ...brevet, have: Math.min(have, need), need, ratio, earned: have >= need };
+  }).sort(
+    (a, b) =>
+      Number(b.earned) - Number(a.earned) ||
+      (a.earned ? TIER_ORDER[a.tier] - TIER_ORDER[b.tier] : b.ratio - a.ratio),
+  );
+}
+
+export function newBrevets(
+  context: BrevetContext,
+  already: Readonly<Record<string, number>>,
+): {
   ids: string[];
   doublons: number;
 } {

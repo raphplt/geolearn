@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ScrollView, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ATLASES, type AtlasId } from '@/data';
@@ -12,40 +12,54 @@ import {
   nextQuestion,
   rungFrom,
   startCalibration,
+  type Calibration,
 } from '@/game/calibration';
 import { rungAt } from '@/game/ladder';
 import type { Question } from '@/game/questions';
 import { createRng, seedFrom } from '@/game/rng';
-import { failure, success, tap } from '@/fx/haptics';
+import { failure, success } from '@/fx/haptics';
 import { AtlasMap, type TerritoryState } from '@/map/AtlasMap';
 import { highlightFrame } from '@/map/framing';
 import { useProgress } from '@/store/progress';
 import { useTheme } from '@/theme';
 import { Button } from '@/ui/Button';
+import { ChoiceRow } from '@/ui/game/ChoiceRow';
 import { Flag } from '@/ui/Flag';
+import { useEmphasis } from '@/ui/motion';
 import { Text } from '@/ui/Text';
 
 export default function Jaugeage() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ atlas?: string; from?: string }>();
+  const params = useLocalSearchParams<{ atlas?: string; then?: string; from?: string }>();
 
   const settings = useProgress((s) => s.settings);
   const updateSettings = useProgress((s) => s.updateSettings);
+  const setFloor = useProgress((s) => s.setFloor);
 
-  const atlasId: AtlasId =
-    params.atlas === 'world-countries' || params.atlas === 'france-departments'
-      ? params.atlas
-      : settings.lastAtlas;
+  /*
+   * Someone who chose to learn both atlases gauges them one after the other,
+   * in this screen rather than through the router: replaying the same route
+   * would not remount it, and the calibration would carry over.
+   */
+  const queue = useMemo(
+    () =>
+      [asAtlas(params.atlas) ?? settings.lastAtlas, asAtlas(params.then)].filter(
+        (id): id is AtlasId => id !== null,
+      ),
+    [params.atlas, params.then, settings.lastAtlas],
+  );
+
+  const [at, setAt] = useState(0);
+  const atlasId = queue[at] ?? settings.lastAtlas;
   const atlas = ATLASES[atlasId];
 
-  const rng = useRef(createRng(seedFrom(`jaugeage:${Date.now()}`)));
-  const [state, setState] = useState(() => startCalibration(atlasId));
-  const [question, setQuestion] = useState<Question | null>(() =>
-    nextQuestion(startCalibration(atlasId), rng.current),
-  );
+  /* The generator belongs to the run: replacing one replaces the other. */
+  const [run, setRun] = useState(() => open(atlasId));
+  const { state, question } = run;
+
   const [picked, setPicked] = useState<string | null>(null);
-  const [floor, setFloor] = useState<number | null>(null);
+  const [floor, setFloorResult] = useState<number | null>(null);
 
   const bar = useSharedValue(0);
   const barStyle = useAnimatedStyle(() => ({ width: `${bar.value * 100}%` }));
@@ -58,57 +72,71 @@ export default function Jaugeage() {
       else failure();
       setPicked(chosenId);
 
-      setTimeout(() => {
-        const next = applyAnswer(state, question.answerId, correct);
-        bar.value = withTiming(next.step / CALIBRATION_LENGTH, { duration: 240 });
-        setPicked(null);
-        setState(next);
+      setTimeout(
+        () => {
+          const next = applyAnswer(state, question.answerId, correct);
+          bar.value = withTiming(next.step / CALIBRATION_LENGTH, {
+            duration: theme.motion.duration.base,
+          });
+          setPicked(null);
 
-        if (isDone(next)) {
-          setFloor(rungFrom(next));
-          setQuestion(null);
-          return;
-        }
-        setQuestion(nextQuestion(next, rng.current));
-      }, correct ? 420 : 900);
+          if (isDone(next)) {
+            setRun((r) => ({ ...r, state: next, question: null }));
+            setFloorResult(rungFrom(next));
+            return;
+          }
+          setRun((r) => ({ ...r, state: next, question: nextQuestion(next, r.rng) }));
+        },
+        correct ? theme.motion.feedback.correct : theme.motion.feedback.wrong,
+      );
     },
-    [question, picked, state, bar],
+    [question, picked, state, bar, theme.motion],
   );
 
-  const finish = useCallback(() => {
-    updateSettings({ lastAtlas: atlasId, floor: floor ?? 0, onboarded: true });
+  const leave = useCallback(() => {
+    updateSettings({ lastAtlas: queue[0] ?? atlasId, onboarded: true });
     router.replace(params.from === 'cabine' ? '/' : '/decouverte');
-  }, [updateSettings, atlasId, floor, params.from]);
+  }, [updateSettings, queue, atlasId, params.from]);
+
+  const finish = useCallback(() => {
+    setFloor(atlasId, floor ?? 0);
+    leave();
+  }, [setFloor, atlasId, floor, leave]);
+
+  const skip = useCallback(() => {
+    setFloor(atlasId, 0);
+    leave();
+  }, [setFloor, atlasId, leave]);
+
+  /** Keeps the measured level and starts over on the next atlas of the queue. */
+  const gaugeNext = useCallback(() => {
+    setFloor(atlasId, floor ?? 0);
+
+    const step = at + 1;
+    const nextAtlas = queue[step];
+    if (!nextAtlas) {
+      leave();
+      return;
+    }
+
+    bar.value = 0;
+    setAt(step);
+    setRun(open(nextAtlas));
+    setPicked(null);
+    setFloorResult(null);
+  }, [setFloor, atlasId, floor, at, queue, bar, leave]);
 
   if (floor !== null) {
-    const rung = rungAt(atlasId, floor);
+    const pending = queue[at + 1];
     return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme.colors.canvas,
-          paddingTop: insets.top,
-          paddingBottom: insets.bottom + theme.space.lg,
-          paddingHorizontal: theme.space.xl,
-        }}
-      >
-        <Animated.View
-          entering={FadeIn.duration(400)}
-          style={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: theme.space.sm }}
-        >
-          <Text variant="cartouche" color="textTertiary">
-            Votre point de départ
-          </Text>
-          <Text variant="displayXL" align="center">
-            {rung.name}
-          </Text>
-          <Text variant="numeral" color="textSecondary" tabular>
-            {state.correct}/{CALIBRATION_LENGTH}
-          </Text>
-        </Animated.View>
-
-        <Button label="Continuer" size="lg" tone="success" block onPress={finish} />
-      </View>
+      <Verdict
+        atlasId={atlasId}
+        floor={floor}
+        correct={state.correct}
+        onNext={finish}
+        pending={pending ?? null}
+        onPending={gaugeNext}
+      />
     );
   }
 
@@ -117,15 +145,7 @@ export default function Jaugeage() {
       <View style={{ flex: 1, backgroundColor: theme.colors.canvas }}>
         <View style={{ flex: 1 }} />
         <View style={{ padding: theme.space.xl, paddingBottom: insets.bottom + theme.space.lg }}>
-          <Button
-            label="Passer"
-            variant="secondary"
-            block
-            onPress={() => {
-              updateSettings({ lastAtlas: atlasId, floor: 0, onboarded: true });
-              router.replace('/decouverte');
-            }}
-          />
+          <Button label="Passer le jaugeage" variant="secondary" block onPress={skip} />
         </View>
       </View>
     );
@@ -143,7 +163,7 @@ export default function Jaugeage() {
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.canvas, paddingTop: insets.top }}>
-      <View style={{ paddingHorizontal: theme.space.xl, paddingTop: theme.space.sm }}>
+      <View style={{ paddingHorizontal: theme.space.xl, paddingTop: theme.space.md }}>
         <View
           style={{
             height: 5,
@@ -156,11 +176,12 @@ export default function Jaugeage() {
             style={[{ height: '100%', backgroundColor: theme.colors.info }, barStyle]}
           />
         </View>
+        <Text variant="caption" color="textTertiary" style={{ marginTop: theme.space.xs }}>
+          Jaugeage · question {state.step + 1} sur {CALIBRATION_LENGTH}
+        </Text>
       </View>
 
-      <Animated.View
-        key={question.id}
-        entering={FadeIn.duration(220)}
+      <View
         style={{
           alignItems: 'center',
           gap: theme.space.md,
@@ -192,7 +213,7 @@ export default function Jaugeage() {
             {question.subject}
           </Text>
         ) : null}
-      </Animated.View>
+      </View>
 
       {showMap ? (
         <AtlasMap
@@ -211,13 +232,13 @@ export default function Jaugeage() {
         <ScrollView
           style={{ flexGrow: 0 }}
           contentContainerStyle={{
-            paddingHorizontal: theme.space.xl,
+            paddingHorizontal: theme.space.lg,
             paddingBottom: insets.bottom + theme.space.lg,
             gap: theme.space.sm,
           }}
         >
           {question.choices.map((choice) => (
-            <Choice
+            <ChoiceRow
               key={choice.id}
               label={choice.label}
               flagCode={choice.flagCode}
@@ -240,56 +261,93 @@ export default function Jaugeage() {
   );
 }
 
-function Choice({
-  label,
-  flagCode,
-  state,
-  onPress,
-  disabled,
+const ATLAS_NAME: Record<AtlasId, string> = {
+  'france-departments': 'la France',
+  'world-countries': 'le monde',
+};
+
+const asAtlas = (value: string | undefined): AtlasId | null =>
+  value === 'world-countries' || value === 'france-departments' ? value : null;
+
+type Run = { rng: () => number; state: Calibration; question: Question | null };
+
+/** One gauging run: its generator, its state, and the question on screen. */
+function open(atlasId: AtlasId): Run {
+  const rng = createRng(seedFrom(`jaugeage:${atlasId}:${Date.now()}`));
+  const state = startCalibration(atlasId);
+  return { rng, state, question: nextQuestion(state, rng) };
+}
+
+function Verdict({
+  atlasId,
+  floor,
+  correct,
+  onNext,
+  pending,
+  onPending,
 }: {
-  label: string;
-  flagCode?: string;
-  state: 'idle' | 'correct' | 'wrong' | 'dimmed';
-  onPress: () => void;
-  disabled: boolean;
+  atlasId: AtlasId;
+  floor: number;
+  correct: number;
+  onNext: () => void;
+  pending: AtlasId | null;
+  onPending: () => void;
 }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const emphasis = useEmphasis(0.8);
+  const rung = rungAt(atlasId, floor);
 
-  const palette =
-    state === 'correct'
-      ? { bg: theme.colors.successSoft, border: theme.colors.success }
-      : state === 'wrong'
-        ? { bg: theme.colors.dangerSoft, border: theme.colors.danger }
-        : { bg: theme.colors.surfaceRaised, border: theme.colors.border };
+  const play = emphasis.play;
+  useEffect(() => {
+    play();
+  }, [play]);
 
   return (
-    <Animated.View entering={FadeInDown.duration(200)}>
-      <Pressable
-        onPress={() => {
-          tap();
-          onPress();
-        }}
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: theme.space.md,
-          minHeight: theme.hitTarget.comfortable,
-          paddingHorizontal: theme.space.lg,
-          borderRadius: theme.radius.md,
-          backgroundColor: palette.bg,
-          borderWidth: theme.borderWidth.thin,
-          borderColor: palette.border,
-          opacity: state === 'dimmed' ? theme.opacity.disabled : 1,
-        }}
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: theme.colors.canvas,
+        paddingTop: insets.top,
+        paddingBottom: insets.bottom + theme.space.lg,
+        paddingHorizontal: theme.space.xl,
+      }}
+    >
+      <Animated.View
+        style={[
+          { flex: 1, alignItems: 'center', justifyContent: 'center', gap: theme.space.sm },
+          emphasis.style,
+        ]}
       >
-        {flagCode ? <Flag cca2={flagCode} height={22} radius={theme.radius.xs} /> : null}
-        <Text variant="label" style={{ flex: 1 }} numberOfLines={1}>
-          {label}
+        <Text variant="cartouche" color="textTertiary">
+          Votre point de départ
         </Text>
-      </Pressable>
-    </Animated.View>
+        <Text variant="displayXL" align="center">
+          {rung.name}
+        </Text>
+        <Text variant="note" color="textSecondary" align="center">
+          {rung.motto}
+        </Text>
+        <Text variant="numeral" color="textSecondary" tabular style={{ marginTop: theme.space.md }}>
+          {correct}/{CALIBRATION_LENGTH}
+        </Text>
+      </Animated.View>
+
+      {pending ? (
+        <View style={{ gap: theme.space.sm }}>
+          <Button
+            label={`Jauger ${ATLAS_NAME[pending]}`}
+            detail="Huit questions de plus"
+            size="lg"
+            tone="success"
+            block
+            onPress={onPending}
+          />
+          <Button label="Plus tard" variant="ghost" block onPress={onNext} />
+        </View>
+      ) : (
+        <Button label="Continuer" size="lg" tone="success" block onPress={onNext} />
+      )}
+    </View>
   );
 }

@@ -1,3 +1,4 @@
+import { probe } from '@/fx/probe';
 import type { Atlas, BBox, Point, Territory } from '@/data/types';
 
 export type Ring = Float64Array;
@@ -83,10 +84,11 @@ export type HitIndex = {
 
 const indexCache = new Map<string, HitIndex>();
 
-export function buildHitIndex<T extends Territory>(atlas: Atlas<T>): HitIndex {
+export function buildHitIndex(atlas: Atlas<Territory>): HitIndex {
   const cached = indexCache.get(atlas.id);
   if (cached) return cached;
 
+  const done = probe.open(`map:index:${atlas.id}`);
   const entries: TerritoryGeometry[] = [];
   const pointOnly: TerritoryGeometry[] = [];
 
@@ -102,8 +104,23 @@ export function buildHitIndex<T extends Territory>(atlas: Atlas<T>): HitIndex {
 
   const index: HitIndex = { atlasId: atlas.id, entries, pointOnly };
   indexCache.set(atlas.id, index);
+  done();
   return index;
 }
+
+/**
+ * Decoding every path of an atlas costs tens of milliseconds. Called ahead of
+ * the first "situer" question — or of opening the Atlas tab — it happens while
+ * the player is still reading, and the render that needs it finds it built.
+ */
+export function warmHitIndex(atlas: Atlas<Territory>): void {
+  if (indexCache.has(atlas.id)) return;
+  setTimeout(() => buildHitIndex(atlas), 0);
+}
+
+/** The index if it is already warm, and never the cost of building one. */
+export const peekHitIndex = (atlas: Atlas<Territory>): HitIndex | null =>
+  indexCache.get(atlas.id) ?? null;
 
 export type HitOptions = {
   tolerance?: number;
